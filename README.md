@@ -9,8 +9,10 @@ While (from visual observation) the agent learns a satisfactory exploration stra
 
 ### Next steps:
 
-Spawn goal entity so that robot gains positive rewards, and scale reward for appropriate intuitive understanding of agents learning progress
+Spawn goal entity so that robot gains positive rewards, and scale reward for appropriate intuitive understanding of agents learning progress.
+
 Add TD3 + PPO
+
 Multi-Robot
 
 ### Bonus steps:
