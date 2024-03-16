@@ -1,0 +1,35 @@
+# Created by https://www.toptal.com/developers/gitignore/api/ros2
+# Edit at https://www.toptal.com/developers/gitignore?templates=ros2
+
+### ROS2 ###
+install/
+log/
+build/
+
+# Ignore generated docs
+*.dox
+*.wikidoc
+
+# eclipse stuff
+.project
+.cproject
+
+# qcreator stuff
+CMakeLists.txt.user
+
+srv/_*.py
+*.pcd
+*.pyc
+qtcreator-*
+*.user
+
+*~
+
+# Emacs
+.#*
+
+# Colcon custom files
+COLCON_IGNORE
+AMENT_IGNORE
+
+# End of https://www.toptal.com/developers/gitignore/api/ros2

@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>active_slam_simulations</name>
+  <version>0.0.0</version>
+  <description>This package, to be paired with the learning package, handles starting the simulation of the environment we use train our robot models</description>
+  <maintainer email="Theo.MooreCalters@gmail.com">Theo Moore-Calters</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>active_slam_interfaces</depend>
+  <depend>slam_toolbox</depend>
+  <depend>navigation2</depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
