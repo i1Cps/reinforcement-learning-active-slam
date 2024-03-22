@@ -2,6 +2,7 @@ import numpy as np
 
 
 def reward_function(
+    found_goal: bool,
     collided: bool,
     angular_vel: float,
     linear_vel: float,
@@ -29,7 +30,14 @@ def reward_function(
     collision_reward = -800 if collided else 0
 
     # Positive Reward
+    goal_reward = 1000 if found_goal else 0
+
+    # Positive Reward
     d_optimality_reward = np.tanh(eta / d_opt)
     return (
-        angular_vel_reward + collision_reward + d_optimality_reward + linear_vel_reward
+        angular_vel_reward
+        + goal_reward
+        + collision_reward
+        + d_optimality_reward
+        + linear_vel_reward
     )
