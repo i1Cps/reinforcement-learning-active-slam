@@ -29,7 +29,7 @@
       </collision>
       <pose frame=''>0 0 0 0 -0 0</pose>
     </link>
-    <static>true</static>
+    <static>0</static>
   </model>
 </sdf>
 <!--           <ambient>1 0 0 1</ambient>

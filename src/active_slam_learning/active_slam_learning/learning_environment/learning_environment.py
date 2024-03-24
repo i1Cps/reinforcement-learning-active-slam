@@ -55,8 +55,8 @@ class LearningEnvironment(Node):
 
         self.gazebo_pause = self.create_client(Empty, "/pause_physics")
         self.gazebo_unpause = self.create_client(Empty, "/unpause_physics")
-        self.gazebo_new_episode_client = self.create_client(
-            Empty, "/gazebo_new_episode"
+        self.initialise_gazebo_environment_client = self.create_client(
+            Empty, "/initialise_gazebo_environment"
         )
 
         ##########################################################################
@@ -97,15 +97,25 @@ class LearningEnvironment(Node):
 
         # Environment CONSTANTS
         self.MAX_STEPS = 500
-        self.GOAL_DISTANCE = 0.1
+        self.GOAL_DISTANCE = 0.25
         self.COLLISION_DISTANCE = 0.2
 
         # Environment Variables
         self.done = False
         self.step_counter = 0
-        self.goal_position = np.array([0, 0])
+        self.goal_position = np.array([0.0, 0.0])
         self.distance_to_goal = np.Inf
 
+        ################################################################
+        #        Initialise Node
+        ####################################################
+
+        req = Empty.Request()
+        while not self.initialise_gazebo_environment_client.wait_for_service(
+            timeout_sec=1.0
+        ):
+            self.get_logger().info("Waiting for initialise gazebo environment service")
+        self.initialise_gazebo_environment_client.call_async(req)
         self.get_logger().info("Sucessfully initialised Learning Environment Node")
 
     # Callback function for LiDAR scan subscriber
@@ -129,6 +139,7 @@ class LearningEnvironment(Node):
             + (self.goal_position[1] - self.actual_pose[1]) ** 2
         )
         print(f"Actual Robot: {self.actual_pose[0]} , {self.actual_pose[1]}")
+        print(f" goals pose: {self.goal_position[0]} , {self.goal_position[1]}")
         print(f"Distance to goal: {self.distance_to_goal}")
 
     # Calculates yaw angle from quaternions, they deprecated Pose2D for some reason???? so this function is useless
@@ -166,44 +177,29 @@ class LearningEnvironment(Node):
         # Reset robot variables to prevent reset loop
         self.current_scan = np.ones(self.NUMBER_OF_SCANS, dtype=np.float32) * 2
         self.current_pose = self.INITIAL_POSE
+        self.actual_pose = self.INITIAL_POSE
         self.current_d_optimality = None
         self.current_linear_velocity = 0.0
         self.current_angular_velocity = 0.0
         self.step_counter = 0
-        # Reset robots velocity
-        desired_vel_cmd = Twist()
-        desired_vel_cmd.linear.x = 0.0
-        desired_vel_cmd.angular.z = 0.0
-        self.cmd_vel_publisher.publish(Twist())
+        ## Reset robots velocity
+        # desired_vel_cmd = Twist()
+        # desired_vel_cmd.linear.x = 0.0
+        # desired_vel_cmd.angular.z = 0.0
+        # self.cmd_vel_publisher.publish(Twist())
 
-        # This is debugging, if you are seeing this ignore the file it is probably broken
-        if self.done:
-            if self.collided:
-                environment_fail_req = Empty.Request()
-                while not self.environment_fail_client.wait_for_service(
-                    timeout_sec=1.0
-                ):
-                    self.get_logger().info(
-                        "Environment fail service is not available, I'll wait"
-                    )
-                self.environment_fail_client.call_async(environment_fail_req)
-            else:
-                environment_success_req = Empty.Request()
-                while not self.environment_success_client.wait_for_service(
-                    timeout_sec=1.0
-                ):
-                    self.get_logger().info(
-                        "Environment success service is not available, I'll wait"
-                    )
-                self.environment_success_client.call_async(environment_success_req)
-
+        environment_fail_req = Empty.Request()
+        while not self.environment_fail_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(
+                "Environment fail service is not available, I'll wait"
+            )
+        self.environment_fail_client.call_async(environment_fail_req)
         self.done = False
         self.truncated = False
         self.collided = False
         response.observation = np.concatenate(
             (self.current_scan, self.current_pose), dtype=np.float32
         )
-
         # TODO: Use ros approved variation of time.sleep()
         time.sleep(3)
         # Pause execution
@@ -223,6 +219,13 @@ class LearningEnvironment(Node):
             found_goal, collided, angular_vel, linear_vel, d_opt, self.MAX_LINEAR_SPEED
         )
 
+    def stop_robots(self):
+        # Reset robots velocity
+        desired_vel_cmd = Twist()
+        desired_vel_cmd.linear.x = 0.0
+        desired_vel_cmd.angular.z = 0.0
+        self.cmd_vel_publisher.publish(Twist())
+
     # Check if the given scan shows a collision
     def has_collided(self):
         return bool(self.COLLISION_DISTANCE > np.min(self.current_scan))
@@ -230,7 +233,9 @@ class LearningEnvironment(Node):
     def has_found_goal(self):
         return self.distance_to_goal < self.GOAL_DISTANCE
 
-    def handle_found_goal(self):
+    def handle_found_goal(self, found_goal):
+        if not found_goal:
+            return
         self.step_counter = 0
         self.done = False
         self.truncated = False
@@ -247,9 +252,7 @@ class LearningEnvironment(Node):
         collided = self.has_collided()
         self.truncated = self.step_counter > self.MAX_STEPS
         self.done = collided
-
-        # if found_goal:
-        #    self.handle_found_goal()
+        self.handle_found_goal(found_goal)
         observation = np.concatenate(
             (self.current_scan, self.current_pose), dtype=np.float32
         )

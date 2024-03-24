@@ -31,7 +31,9 @@ class GazeboEnvironment(Node):
         self.load_slam_map_client = self.create_client(
             DeserializePoseGraph, "/slam_toolbox/deserialize_map"
         )
-        self.set_robot_pose = self.create_client(SetEntityState, "/set_entity_state")
+        self.set_entity_state_client = self.create_client(
+            SetEntityState, "/set_entity_state"
+        )
 
         # Services
         self.environment_success_service = self.create_service(
@@ -41,15 +43,25 @@ class GazeboEnvironment(Node):
             Empty, "/environment_fail", self.environment_fail_callback
         )
 
+        self.initialise_gazebo_environment = self.create_service(
+            Empty, "/initialise_gazebo_environment", self.init_callback
+        )
+
         self.get_logger().info("Sucessfully initialised Gazebo Environment Node")
 
         #############################################################
         #           VARIABLES AND CONSTANTS                         #
         #############################################################
 
+        self.original_robot_position = INITIAL_POSE
+        # store the Pose object so we only create once
+        self.original_robot_pose = Pose()
+        self.original_robot_pose.position.x = self.original_robot_position[0]
+        self.original_robot_pose.position.y = self.original_robot_position[1]
+
         self.previous_goal_position_x = -22.0
         self.previous_goal_position_y = -50.0
-        self.goal_position_x = -2.0
+        self.goal_position_x = 2.0
         self.goal_position_y = 0.5
         self.goal_entity_name = "goal_pad"
         self.goal_entity = os.path.join(
@@ -59,35 +71,35 @@ class GazeboEnvironment(Node):
             "model.sdf",
         )
         self.first_episode = True
-        self.init_callback()
 
-    def init_callback(self):
-        self.delete_entity()
-        self.reset_simulation()
-        self.publish_new_goal()
+    def init_callback(self, request, response):
+        self.publish_new_goal(init=True)
         print("Init, goal pose:", self.goal_position_x, self.goal_position_y)
-        time.sleep(1)
+        return response
 
     def environment_fail_callback(self, request, response):
-        self.delete_entity()
-        self.reset_simulation()
+        self.reset_robot_pose()
         self.reset_slam_map()
-        self.publish_new_goal()
-        # self.generate_new_goal_position()
-        if self.first_episode:
-            self.get_logger().info("Resetting The Environment")
-            self.first_episode = False
-        else:
-            self.get_logger().info("Episode was unsuccesful, Resetting The Environment")
+        self.get_logger().info("Resetting The Environment")
         return response
 
     def environment_success_callback(self, request, response):
-        self.delete_entity()
         self.generate_new_goal_position()
         self.get_logger().info(
             f"Episode success, New goal position: [ {self.goal_position_x}, {self.goal_position_y} ]"
         )
         return response
+
+    def reset_robot_pose(self):
+        req = SetEntityState.Request()
+        req.state.name = "turtlebot3_burger"
+        req.state.pose = self.original_robot_pose
+        while not self.set_entity_state_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(
+                "Set Entity State client not available, waiting some more!"
+            )
+        print("Ressetting robots position")
+        self.set_entity_state_client.call_async(req)
 
     def generate_new_goal_position(self):
         self.previous_goal_position_x = self.goal_position_x
@@ -97,7 +109,7 @@ class GazeboEnvironment(Node):
         while (
             abs(self.previous_goal_position_x - self.goal_position_x)
             + abs(self.previous_goal_position_y - self.goal_position_y)
-        ) < -0.5:
+        ) < 1:
             map_goal_poses = [
                 [2.0, 0.0],
                 [0.0, 2.0],
@@ -112,11 +124,10 @@ class GazeboEnvironment(Node):
                 [1.5, 1.5],
             ]
             debug_goal_poses = [[-1.1, -0.5], [-2, 0.5]]
-            # index = np.random.randint(0, len(map_goal_poses))
-            index = np.random.randint(0, len(debug_goal_poses))
+            index = np.random.randint(0, len(map_goal_poses))
             print(index)
-            self.goal_position_x = float(debug_goal_poses[index][0])
-            self.goal_position_y = float(debug_goal_poses[index][1])
+            self.goal_position_x = float(map_goal_poses[index][0])
+            self.goal_position_y = float(map_goal_poses[index][1])
             generation_attemps += 1
             if generation_attemps > 100:
                 print("ERROR generating new goal")
@@ -144,12 +155,15 @@ class GazeboEnvironment(Node):
         self.load_slam_map_client.call_async(load_slam_map_request)
 
     # Publish the goal position to the learning environment node so it can track whether the agent reaches said goal
-    def publish_new_goal(self):
+    def publish_new_goal(self, init=False):
         goal_position = Pose()
         goal_position.position.x = self.goal_position_x
         goal_position.position.y = self.goal_position_y
         self.goal_position_publisher.publish(goal_position)
-        self.spawn_goal_entity()
+        if init:
+            self.spawn_goal_entity()
+        else:
+            self.move_goal_entity()
 
     def spawn_goal_entity(self):
         goal_position = Pose()
@@ -166,12 +180,26 @@ class GazeboEnvironment(Node):
         print("spawning")
         self.spawn_entity_client.call_async(req)
 
-    def delete_entity(self):
-        req = DeleteEntity.Request()
-        req.name = self.goal_entity_name
-        while not self.delete_entity_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info("Delete entity service is not available")
-        self.delete_entity_client.call_async(req)
+    def move_goal_entity(self):
+        goal_position = Pose()
+        goal_position.position.x = self.goal_position_x
+        goal_position.position.y = self.goal_position_y
+        req = SetEntityState.Request()
+        req.state.name = self.goal_entity_name
+        req.state.pose = goal_position
+        while not self.set_entity_state_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(
+                "Set Entity State client not available, waiting some more!"
+            )
+        print("Ressetting robots position")
+        self.set_entity_state_client.call_async(req)
+
+    # def delete_entity(self):
+    #    req = DeleteEntity.Request()
+    #    req.name = self.goal_entity_name
+    #    while not self.delete_entity_client.wait_for_service(timeout_sec=1.0):
+    #        self.get_logger().info("Delete entity service is not available")
+    #    self.delete_entity_client.call_async(req)
 
 
 def main():
