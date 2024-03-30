@@ -96,7 +96,7 @@ class LearningEnvironment(Node):
         self.current_angular_velocity = 0.0
 
         # Environment CONSTANTS
-        self.MAX_STEPS = 500
+        self.MAX_STEPS = 1000
         self.GOAL_DISTANCE = 0.25
         self.COLLISION_DISTANCE = 0.2
 
@@ -138,9 +138,9 @@ class LearningEnvironment(Node):
             (self.goal_position[0] - self.actual_pose[0]) ** 2
             + (self.goal_position[1] - self.actual_pose[1]) ** 2
         )
-        print(f"Actual Robot: {self.actual_pose[0]} , {self.actual_pose[1]}")
-        print(f" goals pose: {self.goal_position[0]} , {self.goal_position[1]}")
-        print(f"Distance to goal: {self.distance_to_goal}")
+        # print(f"Actual Robot: {self.actual_pose[0]} , {self.actual_pose[1]}")
+        # print(f" goals pose: {self.goal_position[0]} , {self.goal_position[1]}")
+        # print(f"Distance to goal: {self.distance_to_goal}")
 
     # Calculates yaw angle from quaternions, they deprecated Pose2D for some reason???? so this function is useless
     def calculate_yaw(self, q_ang):
@@ -182,11 +182,6 @@ class LearningEnvironment(Node):
         self.current_linear_velocity = 0.0
         self.current_angular_velocity = 0.0
         self.step_counter = 0
-        ## Reset robots velocity
-        # desired_vel_cmd = Twist()
-        # desired_vel_cmd.linear.x = 0.0
-        # desired_vel_cmd.angular.z = 0.0
-        # self.cmd_vel_publisher.publish(Twist())
 
         environment_fail_req = Empty.Request()
         while not self.environment_fail_client.wait_for_service(timeout_sec=1.0):
@@ -263,14 +258,19 @@ class LearningEnvironment(Node):
             # Below just ensures the reward is based on the raw output of the model and not the noise,
             # The noise kind of interfers with the reward function, will streamline later
             # Raw model output is [-1,1] lin and ang vel
-            max(
-                min(self.current_angular_velocity, self.MAX_ANGULAR_SPEED),
-                -self.MAX_ANGULAR_SPEED,
-            ),
-            max(
-                min(self.current_linear_velocity, self.MAX_LINEAR_SPEED),
-                -self.MAX_LINEAR_SPEED,
-            ),
+            #
+            #
+            # NO LONGER THE CASE, TD3 Now outputs actions according to env action space, will update to ddpg soon
+            # max(
+            #    min(self.current_angular_velocity, self.MAX_ANGULAR_SPEED),
+            #    -self.MAX_ANGULAR_SPEED,
+            # ),
+            # max(
+            #    min(self.current_linear_velocity, self.MAX_LINEAR_SPEED),
+            #    -self.MAX_LINEAR_SPEED,
+            # ),
+            self.current_angular_velocity,
+            self.current_linear_velocity,
             self.current_d_optimality,
         )
         response.truncated = self.truncated
@@ -282,11 +282,15 @@ class LearningEnvironment(Node):
     # Very simular to typical step function in normal Reinforcement Learning environments.
     def environment_step_callback(self, request, response):
         self.step_counter += 1
+        # TD3 policy now outputs according to action space, I will update the ddpg to follow similiar
         self.current_linear_velocity = request.actions[0] * self.MAX_LINEAR_SPEED
         self.current_angular_velocity = request.actions[1] * self.MAX_ANGULAR_SPEED
+        print("Speed Lin: ", self.current_linear_velocity)
+        print("Speend Ang: ", self.current_angular_velocity)
+
         desired_vel_cmd = Twist()
-        desired_vel_cmd.linear.x = self.current_linear_velocity
-        desired_vel_cmd.angular.z = self.current_angular_velocity
+        desired_vel_cmd.linear.x = self.current_linear_velocity.item()
+        desired_vel_cmd.angular.z = self.current_angular_velocity.item()
         self.cmd_vel_publisher.publish(desired_vel_cmd)
 
         # Let simulation play out for a bit before observing

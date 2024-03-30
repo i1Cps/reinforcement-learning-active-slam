@@ -1,14 +1,25 @@
 import numpy as np
 
+# THIS FILE IS VERY MESSY, SORRY FOR NOW
+
 #########################################################
 #                   ROBOT SETTINGS                      #
 #########################################################
+
+MAX_LINEAR_SPEED = 0.22
+MAX_ANGULAR_SPEED = 2.0
+NUMBER_OF_SCANS = 90
+
 
 #########################################################
 #                   ENVIRONMENT SETTINGS                #
 #########################################################
 
 INITIAL_POSE = np.array([-2.0, -0.5])
+
+MAX_CONTINUOUS_ACTIONS = np.array([MAX_LINEAR_SPEED, MAX_ANGULAR_SPEED])
+# number of scans plus robot x and y coordinate predicted by robots local SLAM
+ENVIRONMENT_OBSERVATION_SPACE = NUMBER_OF_SCANS + 2
 
 #########################################################
 #            REINFORCEMENT LEARNING SETTINGS            #
