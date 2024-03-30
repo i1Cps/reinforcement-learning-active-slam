@@ -4,6 +4,8 @@
 
 ### Current progress
 
+Attempted to implement TD3, Requires 300 of random exploration making the learning extremely slow. PER plus weight initialisation hopefully can speed things up
+
 Robots can be seen fully exploring environment in search for a goal after 4 hours of training (400 episodes) using naive ddpg
 
 At around 8 hours (700 episodes) robot learns to sequentially find goals (Everytime robot finds a goal, number of steps is reset) Allowing it to chain big score increases per episode.
