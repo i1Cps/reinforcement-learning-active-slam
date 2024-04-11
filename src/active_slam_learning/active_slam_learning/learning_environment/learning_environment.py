@@ -285,8 +285,9 @@ class LearningEnvironment(Node):
         # TD3 policy now outputs according to action space, I will update the ddpg to follow similiar
         self.current_linear_velocity = request.actions[0] * self.MAX_LINEAR_SPEED
         self.current_angular_velocity = request.actions[1] * self.MAX_ANGULAR_SPEED
-        print("Speed Lin: ", self.current_linear_velocity)
-        print("Speend Ang: ", self.current_angular_velocity)
+        print(
+            f"Speed Lin: {self.current_linear_velocity:.4f},    Speed Ang: {self.current_angular_velocity:.4f}"
+        )
 
         desired_vel_cmd = Twist()
         desired_vel_cmd.linear.x = self.current_linear_velocity.item()

@@ -4,7 +4,14 @@
 
 ### Current progress
 
-Attempted to implement TD3, Requires 300 of random exploration making the learning extremely slow. PER plus weight initialisation hopefully can speed things up
+### TD3, works (Unfortunately it looks as if it needs more time to train maybe 3 days.)
+
+TD3 has been implemented, starts exploring the map around 900 episodes, Can be seen chaining goal together at 1500 episodes (40 hours of training)
+The plot within the TD3 folder shows this
+
+I added Weight initialisation plus deeper concatenation of actions to critic network
+
+### DDPG, Proably broken from TD3 changes, Looking to implement TD3 paper version of DDPG
 
 Robots can be seen fully exploring environment in search for a goal after 4 hours of training (400 episodes) using naive ddpg
 
@@ -14,8 +21,9 @@ At around 11 hours (900-1000) robot policy divereges to a local minimum which no
 
 ### Next steps:
 
-Add TD3 + PPO
-
+Prioritized Experience Replay,
+Better Gazebo worlds,
+PPO,
 Multi-Robot
 
 ### Bonus steps:
@@ -26,4 +34,3 @@ MADDPG/MAPPO usually has centralised decentralised learning, can we introduce de
 
 ### Considerations:
 
-More steps per episode

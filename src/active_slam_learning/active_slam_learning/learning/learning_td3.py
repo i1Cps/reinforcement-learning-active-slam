@@ -42,10 +42,10 @@ class LearningTD3(Node):
             tau=0.001,
             max_action_values=MAX_CONTINUOUS_ACTIONS,
             batch_size=64,
-            layer1_size=300,
-            layer2_size=300,
+            layer1_size=512,
+            layer2_size=512,
             max_size=1000000,
-            warmup=100000,
+            warmup=25000,
             n_actions=2,
             logger=self.get_logger(),
         )
@@ -125,6 +125,8 @@ class LearningTD3(Node):
             "./src/active_slam_learning/active_slam_learning/learning/td3/plots/td3.png"
         )
         plot_learning_curve(x, self.score_history, filename)
+        shut_down_training(self):
+            pass
 
     # Handles end of episode (nice, clean and modular)
     def finish_episode(self, score):

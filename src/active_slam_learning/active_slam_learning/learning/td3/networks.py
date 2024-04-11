@@ -3,6 +3,7 @@ import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import numpy as np
 
 
 # This network is equivalent to our Q Function, It evaluates state-action pairs.
@@ -30,13 +31,41 @@ class CriticNetwork(nn.Module):
         )
         self.checkpoint_file = os.path.join(self.chkpt_dir, name + "_td3")
 
-        # Define fully connected layers
-        self.fc1 = nn.Linear(self.input_dims[0] + n_actions, self.fc1_dims)
-        self.fc2 = nn.Linear(self.fc1_dims, self.fc2_dims)
-        self.fc3 = nn.Linear(self.fc2_dims, self.fc2_dims)
+        # Define fully connected layers, Very MESSY <----------------------------
+        self.fc1 = nn.Linear(self.input_dims[0], self.fc1_dims)  # state layer
+        self.fc2 = nn.Linear(self.fc1_dims, int(self.fc2_dims / 2))  # state layer
+
+        self.action_value = nn.Linear(n_actions, int(self.fc2_dims / 2))  # action layer
+
+        self.fc3 = nn.Linear(self.fc2_dims, self.fc2_dims)  # state action layer
 
         # Output layer for Q-value estimation
         self.output = nn.Linear(self.fc2_dims, 1)
+
+        # Initalize weights
+        # First layer
+        f1 = 1.0 / np.sqrt(self.fc1.weight.data.size()[0])
+        self.fc1.weight.data.uniform_(-f1, f1)
+        self.fc1.bias.data.uniform_(-f1, f1)
+
+        # Second layer
+        f2 = 1.0 / np.sqrt(self.fc2.weight.data.size()[0])
+        self.fc2.weight.data.uniform_(-f2, f2)
+        self.fc2.bias.data.uniform_(-f2, f2)
+
+        # Third layer
+        f3 = 1.0 / np.sqrt(self.fc3.weight.data.size()[0])
+        self.fc3.weight.data.uniform_(-f3, f3)
+        self.fc3.bias.data.uniform_(-f3, f3)
+
+        f_output = 0.003
+        self.output.weight.data.uniform_(-f_output, f_output)
+        self.output.bias.data.uniform_(-f_output, f_output)
+
+        # Action layer
+        f4 = 1.0 / np.sqrt(self.action_value.weight.data.size()[0])
+        self.action_value.weight.data.uniform_(-f4, f4)
+        self.action_value.bias.data.uniform_(-f4, f4)
 
         # Optimizer for updating network parameters
         self.optimizer = optim.Adam(self.parameters(), lr=beta)
@@ -59,6 +88,8 @@ class CriticNetwork(nn.Module):
         Returns:
         - q_output (torch.Tensor): Estimated Q-value for the given state-action pair.
         """
+        ########## DEBUG
+        """
         # Concatenate state and action tensors
         state_action = T.cat([state, action], dim=1)
 
@@ -70,7 +101,16 @@ class CriticNetwork(nn.Module):
 
         # Debug
         state_action_value = F.relu(self.fc3(state_action_value))
+        """
 
+        # Im trying the DDPG concatonate in the middle technique
+        state_value = F.relu(self.fc1(state))
+        state_value = F.relu(self.fc2(state_value))
+
+        action_value = F.relu(self.action_value(action))
+
+        state_action_value = T.cat((state_value, action_value), dim=1)
+        state_action_value = F.relu(self.fc3(state_action_value))
         # Output layer for Q-value estimation
         q_output = self.output(state_action_value)
         return q_output
@@ -117,6 +157,19 @@ class ActorNetwork(nn.Module):
         self.mu = nn.Linear(
             self.fc2_dims, self.n_actions
         )  # n_actions because of continuous actions space
+
+        # Initalize weights
+        f1 = 1.0 / np.sqrt(self.fc1.weight.data.size()[0])
+        self.fc1.weight.data.uniform_(-f1, f1)
+        self.fc1.bias.data.uniform_(-f1, f1)
+
+        f2 = 1.0 / np.sqrt(self.fc2.weight.data.size()[0])
+        self.fc2.weight.data.uniform_(-f2, f2)
+        self.fc2.bias.data.uniform_(-f2, f2)
+
+        f3 = 0.003
+        self.mu.weight.data.uniform_(-f3, f3)
+        self.mu.bias.data.uniform_(-f3, f3)
 
         # Optimizer for updating network parameters
         self.optimizer = optim.Adam(self.parameters(), lr=alpha)

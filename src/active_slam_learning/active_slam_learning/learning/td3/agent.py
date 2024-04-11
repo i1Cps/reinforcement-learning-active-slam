@@ -20,10 +20,10 @@ class Agent:
         update_actor_interval=2,
         warmup=1000,
         n_actions=2,
-        max_size=1000000,
+        max_size=300000,
         layer1_size=400,
         layer2_size=300,
-        batch_size=100,
+        batch_size=64,
         noise=0.1,
     ):
         """
@@ -125,6 +125,8 @@ class Agent:
                 np.random.normal(scale=0.2, size=(self.n_actions,)),
                 device=self.actor.device,
             )
+
+            # mu = T.tensor(np.random.uniform(-1.0,1.0))
         else:
             # Use the actor network to select actions based on the current state
             state = T.tensor(observation, dtype=T.float, device=self.actor.device)
@@ -137,11 +139,11 @@ class Agent:
 
         # The noise should not be larger than half the max and min actions
         noise = T.tensor(
-            self.action_noise2.get_noise(self.time_step),
+            self.action_noise2.get_noise(self.noise_step),
             dtype=T.float,
             device=self.actor.device,
         )
-        noise = T.tensor(self.action_noise(), dtype=T.float, device=self.actor.device)
+        # noise = T.tensor(self.action_noise(), dtype=T.float, device=self.actor.device)
         mu_prime = T.clamp(T.add(mu, noise), -1.0, 1.0)
 
         # Clip the action values to ensure they fall within the action space bounds
@@ -189,7 +191,7 @@ class Agent:
         """
 
         # Check if enough samples in memory buffer
-        if self.memory.mem_counter < self.memory_size / 3:
+        if self.memory.mem_counter < self.batch_size:
             return
 
         # Sample experiences from memory buffer
