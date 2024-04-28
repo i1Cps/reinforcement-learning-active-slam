@@ -2,8 +2,9 @@ import numpy as np
 from numpy.core.multiarray import zeros
 import torch.nn.functional as F
 import torch as T
-from active_slam_learning.learning.td3.noise import OUActionNoise, OUNoise
-from active_slam_learning.learning.td3.replay_memory import ReplayBuffer
+from active_slam_learning.learning.td3.noise import OUNoise_1, OUNoise_2
+from active_slam_learning.learning.td3.uniform_memory import ReplayBuffer
+from active_slam_learning.learning.td3.per_memory import SumTree
 from active_slam_learning.learning.td3.networks import ActorNetwork, CriticNetwork
 
 
@@ -14,13 +15,14 @@ class Agent:
         beta,
         input_dims,
         tau,
-        max_action_values,
         logger,
         gamma=0.99,
         update_actor_interval=2,
-        warmup=1000,
+        warmup=10000,
         n_actions=2,
         max_size=300000,
+        alpha_PER=0.5,
+        beta_PER=0.5,
         layer1_size=400,
         layer2_size=300,
         batch_size=64,
@@ -50,7 +52,10 @@ class Agent:
         self.tau = tau
         self.memory_size = max_size
         self.max_action_values = max_action_values
-        self.memory = ReplayBuffer(max_size, input_dims, n_actions)
+        # self.memory = ReplayBuffer(max_size, input_dims, n_actions)
+        self.memory = SumTree(
+            input_dims, n_actions, max_size, batch_size, alpha_PER, beta_PER
+        )
         self.batch_size = batch_size
         self.learn_step_counter = 0
         self.time_step = 0
@@ -58,8 +63,8 @@ class Agent:
         self.n_actions = n_actions
         self.update_actor_iter = update_actor_interval
         # OU noise has correlation, reset action_noise every episode let learning noise run free
-        self.action_noise = OUActionNoise(mu=np.zeros(n_actions))
-        self.action_noise2 = OUNoise(
+        self.noise = OUNoise_1(mu=np.zeros(n_actions))
+        self.noise2 = OUNoise_2(
             action_space=n_actions, max_sigma=0.1, min_sigma=0.1, decay_period=8000000
         )
         self.noise_step = 0
@@ -125,37 +130,18 @@ class Agent:
                 np.random.normal(scale=0.2, size=(self.n_actions,)),
                 device=self.actor.device,
             )
-
-            # mu = T.tensor(np.random.uniform(-1.0,1.0))
         else:
             # Use the actor network to select actions based on the current state
             state = T.tensor(observation, dtype=T.float, device=self.actor.device)
             mu = self.actor.forward(state).to(self.actor.device)
 
-        # Add noise to the selected action for exploration
-        # mu_prime = mu + T.tensor(
-        #    np.random.normal(scale=self.noise), dtype=T.float, device=self.actor.device
-        # )  # This is naive normal noise, we like OU or pink noise
-
-        # The noise should not be larger than half the max and min actions
         noise = T.tensor(
-            self.action_noise2.get_noise(self.noise_step),
+            self.noise2.get_noise(self.noise_step),
             dtype=T.float,
             device=self.actor.device,
         )
         # noise = T.tensor(self.action_noise(), dtype=T.float, device=self.actor.device)
         mu_prime = T.clamp(T.add(mu, noise), -1.0, 1.0)
-
-        # Clip the action values to ensure they fall within the action space bounds
-        # Clip both continuous actions seperately
-
-        # Normalize for env output,  then clamp to max values
-        # mu_prime[0] = (mu_prime[0] * self.max_action_values[0]).clamp(
-        #    -self.max_action_values[0], self.max_action_values[0]
-        # )
-        # mu_prime[1] = (mu_prime[1] * self.max_action_values[1]).clamp(
-        #    -self.max_action_values[1], self.max_action_values[1]
-        # )
 
         # Increment the time step counter
         self.time_step += 1
@@ -164,9 +150,9 @@ class Agent:
         # Convert the action tensor to numpy array and return
         return mu_prime.cpu().detach().numpy()
 
-    def remember(self, state, action, reward, next_state, terminal):
+    def store_transition(self, state, action, reward, next_state, terminal):
         """
-        Store a transition tuple in memory buffer.
+        Store a transition tuple in memory buffer designed for PER.
 
         Parameters:
         - state (array): Current state.
@@ -177,7 +163,44 @@ class Agent:
         """
 
         # Store experience in memory buffer
-        self.memory.store_transition(state, action, reward, next_state, terminal)
+        self.memory.store_transition([state, action, reward, next_state, terminal])
+
+    def sample_memory(self):
+        """
+        Sample a batch of transitions from the replay memory buffer.
+
+        Returns:
+        - tensor_states (tensor): Batch of states.
+        - tensor_actions (tensor): Batch of actions.
+        - tensor_rewards (tensor): Batch of rewards.
+        - tensor_new_states (tensor): Batch of new states.
+        - tensor_terminals (tensor): Batch of terminal flags.
+        """
+        # Sample transitions from the replay memory buffer
+
+        sarsd, sample_idx, weights = self.memory.sample()
+
+        states, actions, rewards, new_states, terminals = sarsd
+
+        # Convert sampled data to tensors for evaluation by the neural network
+        tensor_states = T.tensor(states, dtype=T.float, device=self.critic_1.device)
+        tensor_actions = T.tensor(actions, device=self.critic_1.device)
+        tensor_rewards = T.tensor(rewards, dtype=T.float, device=self.critic_1.device)
+        tensor_new_states = T.tensor(
+            new_states, dtype=T.float, device=self.critic_1.device
+        )
+        tensor_terminals = T.tensor(terminals, device=self.critic_1.device)
+        weights = T.tensor(weights, dtype=T.float, device=self.critic_1.device)
+
+        return (
+            tensor_states,
+            tensor_actions,
+            tensor_rewards,
+            tensor_new_states,
+            tensor_terminals,
+            sample_idx,
+            weights,
+        )
 
     def learn(self):
         """
@@ -191,20 +214,19 @@ class Agent:
         """
 
         # Check if enough samples in memory buffer
-        if self.memory.mem_counter < self.batch_size:
+        if not self.memory.ready():
             return
 
         # Sample experiences from memory buffer
-        states, actions, rewards, next_states, terminals = self.memory.sample_memory(
-            self.batch_size
-        )
-
-        # Convert the sampled experiences into tensors
-        states = T.tensor(states, dtype=T.float, device=self.critic_1.device)
-        actions = T.tensor(actions, dtype=T.float, device=self.critic_1.device)
-        rewards = T.tensor(rewards, dtype=T.float, device=self.critic_1.device)
-        next_states = T.tensor(next_states, dtype=T.float, device=self.critic_1.device)
-        terminals = T.tensor(terminals, device=self.critic_1.device)
+        (
+            states,
+            actions,
+            rewards,
+            next_states,
+            terminals,
+            samples_idx,
+            weights,
+        ) = self.sample_memory()
 
         with T.no_grad():
             # Create noise for exploration
@@ -213,12 +235,6 @@ class Agent:
             next_actions = (self.target_actor.forward(next_states) + noise).clamp(
                 -1.0, 1.0
             )
-
-            # Will comment this, sorry it looks messy
-            # Max and min action[0] is currently 0.22, so scale then clip
-            #
-
-            # Below is the crux of the double dueling technique first established in DDQN
 
             # Compute target Q-values using target critic networks
             target_Q1 = self.target_critic_1.forward(next_states, next_actions)
@@ -233,9 +249,17 @@ class Agent:
             target_Q = rewards + self.gamma * target_Q.view(-1)
             target_Q = target_Q.view(self.batch_size, 1)
 
-        # Compute current Q-values using critic networks
-        current_Q1 = self.critic_1.forward(states, actions)
-        current_Q2 = self.critic_2.forward(states, actions)
+            # Compute current Q-values using critic networks
+            current_Q1 = self.critic_1.forward(states, actions)
+            current_Q2 = self.critic_2.forward(states, actions)
+
+            # Compute TD error for prioritized replay
+            td_error = T.abs(target_Q - current_Q1)
+            td_error = np.clip(td_error, 0.0, 1.0)
+            td_error = td_error.cpu().numpy().flatten
+
+            # Compute importance sampling weights using updated priorities
+            weights = T.tensor(weights, dtype=T.float32, device=self.critic_1.device)
 
         # Compute critic loss
         critic_loss_Q1 = F.mse_loss(current_Q1, target_Q)
