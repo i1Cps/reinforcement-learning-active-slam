@@ -2,7 +2,6 @@ import rclpy
 from rclpy.node import Node
 
 import numpy as np
-from rclpy.utilities import timeout_sec_to_nsec
 import scipy
 import time
 import math
@@ -10,9 +9,9 @@ import math
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from std_srvs.srv import Empty
+from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist, PoseWithCovarianceStamped, Pose
-from slam_toolbox.srv import DeserializePoseGraph
-from active_slam_interfaces.srv import StepEnv, ResetEnv
+from active_slam_interfaces.srv import StepEnv, ResetEnv, ResetGazeboEnv
 
 from active_slam_learning.common.settings import INITIAL_POSE
 from active_slam_learning.learning_environment.reward_function import reward_function
@@ -24,9 +23,7 @@ class LearningEnvironment(Node):
     def __init__(self):
         super().__init__("learning_environment")
 
-        ################################################################
-        # Initialise subscribers, publishers, clients and services     #
-        ################################################################
+        # -------- Initialise subscribers, publishers, clients and services ------- #
 
         # Subscribers
         self.scan_subscriber = self.create_subscription(
@@ -37,9 +34,21 @@ class LearningEnvironment(Node):
             PoseWithCovarianceStamped, "/pose", self.covariance_matrix_callback, 10
         )
 
-        self.goal_position_subscriber = self.create_subscription(
-            Pose, "/goal_position", self.goal_position_callback, 10
+        self.goal_position_reset_pose_subscriber = self.create_subscription(
+            Pose,
+            "/goal_position_reset_pose",
+            self.goal_position_reset_pose_callback,
+            10,
         )
+
+        """
+        self.robot_position_reset_pose_subscriber = self.create_subscription(
+            Pose,
+            "/robot_position_reset_pose",
+            self.robot_position_reset_pose_callback,
+            10,
+        )
+        """
 
         self.odom_subscriber = self.create_subscription(
             Odometry, "/odom", self.odom_callback, 10
@@ -49,29 +58,30 @@ class LearningEnvironment(Node):
         self.cmd_vel_publisher = self.create_publisher(Twist, "/cmd_vel", 10)
 
         # Clients
-        self.load_slam_grid_client = self.create_client(
-            DeserializePoseGraph, "/slam_toolbox/deserialize_map"
-        )
-
-        self.gazebo_pause = self.create_client(Empty, "/pause_physics")
-        self.gazebo_unpause = self.create_client(Empty, "/unpause_physics")
         self.initialise_gazebo_environment_client = self.create_client(
             Empty, "/initialise_gazebo_environment"
         )
 
-        ##########################################################################
         self.environment_success_client = self.create_client(
             Empty, "/environment_success"
         )
-        self.environment_fail_client = self.create_client(Empty, "/environment_fail")
-        ##########################################################################
+        self.environment_reset_client = self.create_client(
+            ResetGazeboEnv, "/environment_reset"
+        )
 
-        # Services
+        # -------------------------------- Services --------------------------------- #
         self.environment_step = self.create_service(
             StepEnv, "/environment_step", self.environment_step_callback
         )
         self.reset_environment = self.create_service(
             ResetEnv, "/reset_environment_rl", self.reset_callback
+        )
+
+        # ------------------------------- ros style multi thread (lol) ---------------- #
+        # Sub Node to await request within a call back. At this point im a principle ROS engineer
+        self.sub_node = rclpy.create_node("sub_node")
+        self.sub_client = self.sub_node.create_client(
+            ResetGazeboEnv, "/environment_reset"
         )
 
         #################################################################
@@ -98,13 +108,16 @@ class LearningEnvironment(Node):
         # Environment CONSTANTS
         self.MAX_STEPS = 1000
         self.GOAL_DISTANCE = 0.25
-        self.COLLISION_DISTANCE = 0.2
+        self.COLLISION_DISTANCE = 0.18
 
         # Environment Variables
         self.done = False
         self.step_counter = 0
         self.goal_position = np.array([0.0, 0.0])
         self.distance_to_goal = np.Inf
+
+        # DEBUG
+        self.reward_debug = True
 
         ################################################################
         #        Initialise Node
@@ -164,39 +177,59 @@ class LearningEnvironment(Node):
         d_optimality = np.exp(np.sum(np.log(eigv)) / n)
         self.current_d_optimality = d_optimality
 
+        # SLam toolbox gets excited at the start pf episodes sometimes
+        if self.step_counter < 20 and self.current_d_optimality == 1:
+            self.current_d_optimality = 0.01
+
         # Get Pose
         pose = data.pose
         self.current_pose = np.array([pose.position.x, pose.position.y])
 
-    def goal_position_callback(self, data):
+    def goal_position_reset_pose_callback(self, data):
         self.goal_position[0] = data.position.x
         self.goal_position[1] = data.position.y
         print(f"new goal pose: [ {self.goal_position[0]} , {self.goal_position[1]} ]")
 
+    """ Might use this instead of service for robot poses reset callback
+    def robot_position_reset_pose_callback(self, data):
+        print("heya")
+        self.current_pose = [data.position.x, data.position.y]
+        self.actual_pose = [data.position.x, data.position.y]
+        print(f"new robot pose: [{self.actual_pose[0]} , {self.actual_pose[1]}]")
+    """
+
     def reset_callback(self, request, response):
         # Reset robot variables to prevent reset loop
         self.current_scan = np.ones(self.NUMBER_OF_SCANS, dtype=np.float32) * 2
-        self.current_pose = self.INITIAL_POSE
-        self.actual_pose = self.INITIAL_POSE
-        self.current_d_optimality = None
+        self.current_pose = None
+        self.actual_pose = None
+        self.current_d_optimality = 0.01
         self.current_linear_velocity = 0.0
         self.current_angular_velocity = 0.0
         self.step_counter = 0
-
-        environment_fail_req = Empty.Request()
-        while not self.environment_fail_client.wait_for_service(timeout_sec=1.0):
+        req = ResetGazeboEnv.Request()
+        while not self.environment_reset_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(
-                "Environment fail service is not available, I'll wait"
+                "Environment reset service is not available, I'll wait"
             )
-        self.environment_fail_client.call_async(environment_fail_req)
+        future = self.sub_client.call_async(req)
+        rclpy.spin_until_future_complete(self.sub_node, future)
+        pose: ResetGazeboEnv.Response = future.result()
+        self.current_pose = [pose.pose.position.x, pose.pose.position.y]
+        self.actual_pose = [pose.pose.position.x, pose.pose.position.y]
         self.done = False
         self.truncated = False
         self.collided = False
         response.observation = np.concatenate(
-            (self.current_scan, self.current_pose), dtype=np.float32
+            (
+                self.current_scan,
+                self.current_pose,
+                np.array([self.current_d_optimality * 10]),
+            ),
+            dtype=np.float32,
         )
+        time.sleep(2)
         # TODO: Use ros approved variation of time.sleep()
-        time.sleep(3)
         # Pause execution
 
         return response
@@ -211,7 +244,13 @@ class LearningEnvironment(Node):
         d_opt: float | None,
     ) -> float:
         return reward_function(
-            found_goal, collided, angular_vel, linear_vel, d_opt, self.MAX_LINEAR_SPEED
+            found_goal,
+            collided,
+            angular_vel,
+            linear_vel,
+            d_opt,
+            self.MAX_LINEAR_SPEED,
+            self.reward_debug,
         )
 
     def stop_robots(self):
@@ -249,26 +288,17 @@ class LearningEnvironment(Node):
         self.done = collided
         self.handle_found_goal(found_goal)
         observation = np.concatenate(
-            (self.current_scan, self.current_pose), dtype=np.float32
+            (
+                self.current_scan,
+                self.current_pose,
+                np.array([self.current_d_optimality * 10]),
+            ),
+            dtype=np.float32,
         )
         response.state = observation
         response.reward = self.get_rewards(
             found_goal,
             collided,
-            # Below just ensures the reward is based on the raw output of the model and not the noise,
-            # The noise kind of interfers with the reward function, will streamline later
-            # Raw model output is [-1,1] lin and ang vel
-            #
-            #
-            # NO LONGER THE CASE, TD3 Now outputs actions according to env action space, will update to ddpg soon
-            # max(
-            #    min(self.current_angular_velocity, self.MAX_ANGULAR_SPEED),
-            #    -self.MAX_ANGULAR_SPEED,
-            # ),
-            # max(
-            #    min(self.current_linear_velocity, self.MAX_LINEAR_SPEED),
-            #    -self.MAX_LINEAR_SPEED,
-            # ),
             self.current_angular_velocity,
             self.current_linear_velocity,
             self.current_d_optimality,
@@ -282,13 +312,12 @@ class LearningEnvironment(Node):
     # Very simular to typical step function in normal Reinforcement Learning environments.
     def environment_step_callback(self, request, response):
         self.step_counter += 1
-        # TD3 policy now outputs according to action space, I will update the ddpg to follow similiar
-        self.current_linear_velocity = request.actions[0] * self.MAX_LINEAR_SPEED
-        self.current_angular_velocity = request.actions[1] * self.MAX_ANGULAR_SPEED
-        print(
-            f"Speed Lin: {self.current_linear_velocity:.4f},    Speed Ang: {self.current_angular_velocity:.4f}"
-        )
-
+        # self.current_linear_velocity = request.actions[0] * self.MAX_LINEAR_SPEED
+        # self.current_angular_velocity = request.actions[1] * self.MAX_ANGULAR_SPEED
+        self.current_linear_velocity = request.actions[0]
+        self.current_angular_velocity = request.actions[1]
+        # if action_sum > 45:
+        # reward += -50
         desired_vel_cmd = Twist()
         desired_vel_cmd.linear.x = self.current_linear_velocity.item()
         desired_vel_cmd.angular.z = self.current_angular_velocity.item()
