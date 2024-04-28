@@ -93,6 +93,7 @@ class LearningTD3(Node):
             self.model.reset_noise()
             # Get initial observation state
             obs = util.reset(self)
+            print("yoooooo")
 
             # Unpause sim and sleep for half a second to allow for gazebo to catch up
             # util.unpause_simulation(self)
@@ -106,7 +107,7 @@ class LearningTD3(Node):
 
                 # Add to memory buffer
                 if self.training:
-                    self.model.remember(
+                    self.model.store_transition(
                         obs, action, reward, next_obs, truncated or terminal
                     )
                     self.model.learn()
@@ -125,8 +126,6 @@ class LearningTD3(Node):
             "./src/active_slam_learning/active_slam_learning/learning/td3/plots/td3.png"
         )
         plot_learning_curve(x, self.score_history, filename)
-        shut_down_training(self):
-            pass
 
     # Handles end of episode (nice, clean and modular)
     def finish_episode(self, score):
