@@ -18,8 +18,11 @@ NUMBER_OF_SCANS = 90
 INITIAL_POSE = np.array([-2.0, -0.5])
 
 MAX_CONTINUOUS_ACTIONS = np.array([MAX_LINEAR_SPEED, MAX_ANGULAR_SPEED])
-# number of scans plus robot x and y coordinate predicted by robots local SLAM
-ENVIRONMENT_OBSERVATION_SPACE = NUMBER_OF_SCANS + 2
+
+
+# Scans + Pose_x + Pose_y + D_Optimality
+ENVIRONMENT_OBSERVATION_SPACE = NUMBER_OF_SCANS + 3
+
 
 #########################################################
 #            REINFORCEMENT LEARNING SETTINGS            #
@@ -28,13 +31,15 @@ ENVIRONMENT_OBSERVATION_SPACE = NUMBER_OF_SCANS + 2
 # DQN SETTINGS:
 
 # DDPG SETTINGS:
-ALPHA = 0.001
-BETA = 0.001
-TAU = 0.001
-BATCH_SIZE = 64
-FC1_DIMS = 300
-FC2_DIMS = 300
+ALPHA = 0.0001
+BETA = 0.003
+TAU = 0.005
+BATCH_SIZE = 100
+FC1_DIMS = 512
+FC2_DIMS = 512
 MAX_SIZE = 1000000  # Adjust according to your system, I have 32GB RAM
+RANDOM_STEPS = 50000
+TRAINING_EPISODES = 2000
 
 # TD3 SETTINGS:
 

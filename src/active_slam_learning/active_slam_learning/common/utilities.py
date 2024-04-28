@@ -55,6 +55,7 @@ def step(agent_self, action, discrete=False):
                     "Exception while calling service: {0}".format(future.exception())
                 )
                 print("Error getting step service response, this wont output anywhere")
+    print("next")
 
 
 # Make this spin til complete
