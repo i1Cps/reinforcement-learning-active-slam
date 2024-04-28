@@ -27,6 +27,7 @@ setup(
     entry_points={
         "console_scripts": [
             "learning_ddpg = active_slam_learning.learning.learning_ddpg:main",
+            "learning_ppo = active_slam_learning.learning.learning_ppo:main",
             "learning_td3 = active_slam_learning.learning.learning_td3:main",
             "learning_environment = active_slam_learning.learning_environment.learning_environment:main",
             "gazebo_environment = active_slam_learning.gazebo_environment.gazebo_environment:main",
