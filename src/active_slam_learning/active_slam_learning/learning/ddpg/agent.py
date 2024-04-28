@@ -1,7 +1,9 @@
 import numpy as np
+from torch._C import dtype
 import torch.nn.functional as F
 import torch as T
-from active_slam_learning.learning.ddpg.noise import OUActionNoise
+import torch.nn as nn
+from active_slam_learning.learning.ddpg.noise import OUNoise_1, OUNoise_2
 from active_slam_learning.learning.ddpg.replay_memory import ReplayBuffer
 from active_slam_learning.learning.ddpg.networks import ActorNetwork, CriticNetwork
 
@@ -11,16 +13,16 @@ class Agent:
         self,
         alpha,
         beta,
-        input_dims,
         tau,
+        input_dims,
         n_actions,
+        max_action,
         logger,
         gamma=0.99,
         max_size=1000000,
         fc1_dims=400,
         fc2_dims=300,
         batch_size=64,
-        episodes_until_learning=50,
     ):
         self.gamma = gamma
         self.alpha = alpha
@@ -28,13 +30,14 @@ class Agent:
         self.tau = tau
         self.batch_size = batch_size
         self.logger = logger
-        self.episodes_until_learning = episodes_until_learning
+        self.time_step = 0
+        self.n_actions = n_actions
+        self.max_action = max_action
 
         self.memory = ReplayBuffer(max_size, input_dims, n_actions)
-        self.noise = OUActionNoise(mu=np.zeros(n_actions))
 
         self.actor = ActorNetwork(
-            input_dims, fc1_dims, fc2_dims, n_actions, alpha, name="actor"
+            input_dims, fc1_dims, fc2_dims, n_actions, max_action, alpha, name="actor"
         )
 
         self.critic = CriticNetwork(
@@ -42,7 +45,13 @@ class Agent:
         )
 
         self.target_actor = ActorNetwork(
-            input_dims, fc1_dims, fc2_dims, n_actions, alpha, name="target_actor"
+            input_dims,
+            fc1_dims,
+            fc2_dims,
+            n_actions,
+            max_action,
+            alpha,
+            name="target_actor",
         )
 
         self.target_critic = CriticNetwork(
@@ -52,71 +61,59 @@ class Agent:
 
     # Use the actor network to generate an action given a state,  this network is a representation of our policy
     def choose_action(self, observation):
-        # Required for batch normalization and drop out stuff
-        self.actor.eval()
-        # state = T.from_numpy(observation)
-        state = T.tensor(observation[np.newaxis, :], dtype=T.float).to(
-            self.actor.device
+        with T.no_grad():
+            state = T.tensor(observation[np.newaxis, :], dtype=T.float).to(
+                self.actor.device
+            )
+            mu = self.actor.forward(state).to(self.actor.device).cpu().numpy()[0]
+            noise = np.random.normal(0, self.max_action * 0.1, size=self.n_actions)
+            return (mu + noise).clip(-self.max_action, self.max_action)
+
+    def choose_random_action(self):
+        return np.random.normal(0, self.max_action * 0.1, size=self.n_actions).clip(
+            -self.max_action, self.max_action
         )
-
-        mu = self.actor.forward(state).to(self.actor.device)
-        mu_prime = mu + T.tensor(self.noise(), dtype=T.float).to(self.actor.device)
-        self.actor.train()
-
-        # AKA The chosen actions
-        return mu_prime.cpu().detach().numpy()[0]
 
     def store_transition(self, state, action, reward, new_state, terminal):
         self.memory.store_transition(state, action, reward, new_state, terminal)
 
-    def save_models(self):
-        self.actor.save_checkpoint()
-        self.target_actor.save_checkpoint()
-        self.critic.save_checkpoint()
-        self.target_critic.save_checkpoint()
-
-    def load_models(self):
-        self.actor.load_checkpoint()
-        self.target_actor.load_checkpoint()
-        self.critic.load_checkpoint()
-        self.target_critic.load_checkpoint()
-
-    # Skip learning if episode number is less than X
-    def learn(self, current_episode):
-        if current_episode < self.episodes_until_learning:
+    def learn(self):
+        if not self.memory.is_ready(self.batch_size):
             return
 
-        states, actions, rewards, new_states, terminals = self.memory.sample_memory(
-            self.batch_size
-        )
+        (
+            states,
+            actions,
+            rewards,
+            next_states,
+            terminals,
+        ) = self.memory.sample_memory(self.batch_size)
         states = T.tensor(states, dtype=T.float).to(self.actor.device)
         actions = T.tensor(actions, dtype=T.float).to(self.actor.device)
         rewards = T.tensor(rewards, dtype=T.float).to(self.actor.device)
-        new_states = T.tensor(new_states, dtype=T.float).to(self.actor.device)
+        next_states = T.tensor(next_states, dtype=T.float).to(self.actor.device)
         terminals = T.tensor(terminals).to(self.actor.device)
 
-        # Below is based on OG DDPG continuous control paper
-        # It uses typical Actor critic from policy gradient theorem but with DQN style stability using target network
+        # ------------------- Update critic -------------------- #
 
-        # critic_value_next is the value from the next state action pair
-        target_actions = self.target_actor.forward(new_states)
-        critic_value_next = self.target_critic.forward(new_states, target_actions)
+        with T.no_grad():
+            next_actions = self.target_actor(next_states)
+            Q_critic_next = self.target_critic(next_states, next_actions)
+            Q_critic_next[terminals] = 0.0
+            Q_critic_next = Q_critic_next.view(-1)
 
-        # critic_value_cur is the value for the current state action pair that we sampled
-        critic_value_cur = self.critic.forward(states, actions)
+            Q_target = rewards + self.gamma * Q_critic_next
+            Q_target = Q_target.view(self.batch_size, 1)
 
-        critic_value_next[terminals] = 0.0
-        critic_value_next = critic_value_next.view(-1)
+        Q_critic = self.critic.forward(states, actions)
 
-        target = rewards + self.gamma * critic_value_next
-        target = target.view(self.batch_size, 1)
-
+        # Loss calculation
+        critic_loss = F.mse_loss(Q_critic, Q_target)
         self.critic.optimizer.zero_grad()
-        # critic_loss = F.mse_loss(target, critic_value_cur)
-        # Order is irrelevant for this loss function
-        critic_loss = F.mse_loss(critic_value_cur, target)
         critic_loss.backward()
         self.critic.optimizer.step()
+
+        # -------------- Update actor -------------------------#
 
         self.actor.optimizer.zero_grad()
         actor_loss = -self.critic.forward(states, self.actor.forward(states))
@@ -124,10 +121,10 @@ class Agent:
         actor_loss.backward()
         self.actor.optimizer.step()
 
+        # -------------------- Update target networks ---------------#
+
         self.update_network_parameters()
 
-    # Instead of a hard copy, we use, tau, a weight/ratio of how much we want to copy over,
-    # 0.5 50%, 0.9 90% of original critic etc
     def update_network_parameters(self, tau=None):
         if tau is None:
             tau = self.tau
@@ -157,10 +154,14 @@ class Agent:
         self.target_critic.load_state_dict(critic_state_dict)
         self.target_actor.load_state_dict(actor_state_dict)
 
-        # unrecommened version for batch normalization instead of layer
-        # self.target_critic.load_state_dict(critic_state_dict, strict =False)
-        # self.target_actor.laod_state_dict(actor_state_dict, strick = False)
-        #
+    def save_models(self):
+        self.actor.save_checkpoint()
+        self.target_actor.save_checkpoint()
+        self.critic.save_checkpoint()
+        self.target_critic.save_checkpoint()
 
-    def reset_noise(self):
-        self.noise.reset()
+    def load_models(self):
+        self.actor.load_checkpoint()
+        self.target_actor.load_checkpoint()
+        self.critic.load_checkpoint()
+        self.target_critic.load_checkpoint()

@@ -4,8 +4,7 @@ from rclpy.node import Node
 
 import numpy as np
 
-from std_srvs.srv import Empty
-from slam_toolbox.srv import SerializePoseGraph
+from std_msgs.msg import Bool
 from active_slam_interfaces.srv import StepEnv, ResetEnv
 from active_slam_learning.learning.ddpg.agent import Agent
 from active_slam_learning.learning.ddpg.utils import plot_learning_curve
@@ -18,6 +17,10 @@ from active_slam_learning.common.settings import (
     FC1_DIMS,
     FC2_DIMS,
     MAX_SIZE,
+    RANDOM_STEPS,
+    MAX_CONTINUOUS_ACTIONS,
+    ENVIRONMENT_OBSERVATION_SPACE,
+    TRAINING_EPISODES,
 )
 
 
@@ -29,43 +32,34 @@ class LearningDDPG(Node):
         self.best_score = 0
         self.total_steps = 0
         self.score_history = []
-        self.training_episodes = 2000
-        self.observe_steps = 500
+        self.training_episodes = TRAINING_EPISODES
         self.training = True
         self.print_interval = 1
         self.model_is_learning = False
         self.model = Agent(
-            alpha=0.0001,
-            beta=0.001,
-            input_dims=(92,),
-            tau=0.001,
+            alpha=ALPHA,
+            beta=BETA,
+            input_dims=(ENVIRONMENT_OBSERVATION_SPACE,),
+            tau=TAU,
             n_actions=2,
-            batch_size=64,
-            fc1_dims=300,
-            fc2_dims=300,
-            max_size=1000000,
+            max_action=MAX_CONTINUOUS_ACTIONS,
+            batch_size=BATCH_SIZE,
+            fc1_dims=FC1_DIMS,
+            fc2_dims=FC2_DIMS,
+            max_size=MAX_SIZE,
             logger=self.get_logger(),
         )
 
-        # Clients
+        # -------------------- Publisher ------------------------ #
+
+        self.shutdown_publisher = self.create_publisher(Bool, "/shutdown_rl_nodes", 10)
+
+        # --------------------- Clients ---------------------------#
+        #
         self.environment_step_client = self.create_client(StepEnv, "/environment_step")
         self.reset_environment_client = self.create_client(
             ResetEnv, "/reset_environment_rl"
         )
-        self.gazebo_pause = self.create_client(Empty, "/pause_physics")
-        self.gazebo_unpause = self.create_client(Empty, "/unpause_physics")
-        self.save_slam_grid_client = self.create_client(
-            SerializePoseGraph, "/slam_toolbox/serialize_map"
-        )
-
-        # Immediately save the empty slam initial_map. This is a quick hack until slam_toolbox release reset() service
-        req = SerializePoseGraph.Request()
-        req.filename = "./src/active_slam_learning/config/initial_map"
-        while not self.save_slam_grid_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info(
-                "save slam grid service not available, waiting again..."
-            )
-        self.save_slam_grid_client.call_async(req)
 
         if T.cuda.is_available:
             self.get_logger().info("GPU AVAILABLE")
@@ -78,48 +72,30 @@ class LearningDDPG(Node):
     # Main learning loop
     def start(self, n_games):
         self.get_logger().info("Starting the learning loop")
-        # Pause the simulation while we intialise episode
-        # util.pause_simulation(self)
-        score_history = []
-        for i in range(n_games):
-            # Reset episode variables
-            terminal = False
-            truncated = False
+        for _ in range(n_games):
+            # Reset episode
+            observation = util.reset(self)
+            done = False
             score = 0
-
-            self.model.reset_noise()
-            # Get initial observation state
-            obs = util.reset(self)
-
-            # Unpause sim and sleep for half a second to allow for gazebo to catch up
-            # util.unpause_simulation(self)
-
-            # Episode loop, This loop ends when episode is 'done' or is 'truncated'
-            while not (terminal or truncated):
-                action = self.model.choose_action(obs)
-
-                # Send action to environment and get returned state
+            while not done:
+                if self.total_steps < RANDOM_STEPS:
+                    action = self.model.choose_random_action()
+                else:
+                    action = self.model.choose_action(observation)
                 next_obs, reward, terminal, truncated = util.step(self, action)
-
-                # Add to memory buffer
-                if self.training:
-                    self.model.store_transition(
-                        obs, action, reward, next_obs, truncated or terminal
-                    )
-                    self.model.learn(current_episode=i)
-
-                obs = next_obs
-                score += reward
                 self.total_steps += 1
-
-            # Episode done
-            # util.pause_simulation(self)
-
+                done = terminal or truncated
+                self.model.store_transition(observation, action, reward, next_obs, done)
+                if self.total_steps >= RANDOM_STEPS:
+                    self.model.learn()
+                score += reward
+                observation = next_obs
             self.finish_episode(score)
 
         x = [i + 1 for i in range(n_games)]
-        filename = "./src/single_slam/single_slam/learning/ddpg/plots/ddpg.png"
-        plot_learning_curve(x, score_history, filename)
+        filename = "./src/active_slam_learning/active_slam_learning/learning/ddpg/plots/ddpg.png"
+        plot_learning_curve(x, self.score_history, filename)
+        # self.shutdown_nodes()
 
     # Handles end of episode (nice, clean and modular)
     def finish_episode(self, score):
@@ -140,12 +116,19 @@ class LearningDDPG(Node):
                 )
             )
 
+    def shutdown_nodes(self):
+        self.get_logger().info("Shutting down the node and ROS.")
+        shutdown_message = Bool(data=True)
+        self.shutdown_publisher.publish(shutdown_message)
+        self.destroy_node()
+        rclpy.shutdown()
+
 
 def main():
     rclpy.init()
     learning_ddpg = LearningDDPG()
     rclpy.spin(learning_ddpg)
-    learning_ddpg.destroy_node()
+    # learning_ddpg.destroy_node()
     rclpy.shutdown()
 
 
