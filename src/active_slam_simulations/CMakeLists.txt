@@ -24,7 +24,7 @@ if(BUILD_TESTING)
 endif()
 
 install(
-  DIRECTORY robot_descriptions launch worlds models
+  DIRECTORY robot_descriptions launch worlds models config
   DESTINATION share/${PROJECT_NAME}
 )
 ament_package()
