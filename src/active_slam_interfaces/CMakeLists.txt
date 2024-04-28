@@ -7,11 +7,14 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 set(srv_files
   "srv/StepEnv.srv"
   "srv/ResetEnv.srv"
+  "srv/ResetGazeboEnv.srv"
+  DEPENDENCIES geometry_msgs
 )
 
 if(BUILD_TESTING)
