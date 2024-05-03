@@ -71,11 +71,16 @@ class GazeboEnvironment(Node):
         #           VARIABLES AND CONSTANTS                         #
         #############################################################
 
-        # Define quaternions for up,down,left,right orientation
-        LEFT = Quaternion(z=0.0, w=1.0)
-        RIGHT = Quaternion(z=math.sin(math.pi), w=math.cos(math.pi))
-        UP = Quaternion(z=math.sin(math.pi / 2), w=math.cos(math.pi / 2))
-        DOWN = Quaternion(z=math.sin(-math.pi / 2), w=math.cos(-math.pi / 2))
+        RIGHT = Quaternion(z=0.0, w=1.0)  # No rotation
+        DOWN = Quaternion(
+            z=math.sin(math.pi / 4), w=math.cos(math.pi / 4)
+        )  # 90 degrees rotation around Z
+        LEFT = Quaternion(
+            z=math.sin(math.pi / 2), w=math.cos(math.pi / 2)
+        )  # 180 degrees rotation around Z
+        UP = Quaternion(
+            z=math.sin(3 * math.pi / 4), w=math.cos(3 * math.pi / 4)
+        )  # 270 degrees rotation around Z
 
         # List of positions
         self.ROBOT_POSITIONS = [
@@ -118,6 +123,14 @@ class GazeboEnvironment(Node):
             Point(x=1.864, y=0.612, z=0.001),
             Point(x=-2.77, y=-3.097, z=0.001),
             Point(x=2.55, y=-2.62, z=0.001),
+        ]
+
+        self.GOAL_POSITIONS = [
+            Point(x=1.9946, y=1.0198, z=0.001),
+            Point(x=-2.399, y=1.411, z=0.001),
+            Point(x=-0.876, y=4.17354, z=0.001),
+            Point(x=-0.62, y=-0.95866, z=0.001),
+            Point(x=-2.7465, y=-1.0415, z=0.001),
         ]
 
         self.previous_goal_pose: Pose = Pose(position=self.GOAL_POSITIONS[0])

@@ -7,7 +7,7 @@
         <pose frame=''>0 0 0.0005 0 -0 0</pose>
         <geometry>
           <cylinder>
-            <radius>0.2</radius>
+            <radius>0.6</radius>
             <length>0.001</length>
           </cylinder>
         </geometry>
