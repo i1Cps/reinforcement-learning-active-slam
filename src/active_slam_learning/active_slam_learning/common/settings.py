@@ -28,8 +28,6 @@ ENVIRONMENT_OBSERVATION_SPACE = NUMBER_OF_SCANS + 3
 #            REINFORCEMENT LEARNING SETTINGS            #
 #########################################################
 
-# DQN SETTINGS:
-
 # DDPG SETTINGS:
 ALPHA = 0.0001
 BETA = 0.003
@@ -40,7 +38,5 @@ FC2_DIMS = 512
 MAX_SIZE = 1000000  # Adjust according to your system, I have 32GB RAM
 RANDOM_STEPS = 50000
 TRAINING_EPISODES = 2000
-
-# TD3 SETTINGS:
 
 # PPO SETTINGS:
