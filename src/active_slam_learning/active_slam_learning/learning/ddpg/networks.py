@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,27 +7,37 @@ import numpy as np
 
 
 class CriticNetwork(nn.Module):
-    def __init__(self, input_dims, fc1_dims, fc2_dims, n_actions, beta, name):
+    """
+    Critic Network for DDPG, evaluates the action-value function Q(s, a).
+    """
+
+    def __init__(
+        self,
+        input_dims: int,
+        learning_rate: float,
+        fc1: int,
+        fc2: int,
+        name: str = "critic",
+        checkpoint_dir: str = "models",
+        scenario: str = "unclassified",
+    ):
         super(CriticNetwork, self).__init__()
-        self.beta = beta
-        self.chkpt_dir = (
-            "./src/active_slam_learning/active_slam_learning/learning/ddpg/models"
-        )
-        self.checkpoint_file = os.path.join(self.chkpt_dir, name + "_ddpg")
+        self.checkpoint_dir = Path(checkpoint_dir) / scenario
+        self.checkpoint_file = self.checkpoint_dir / (name + "_ddpg")
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        # Three Fully Connected Layers
-        self.fc1 = nn.Linear(input_dims[0] + n_actions, fc1_dims)
-        self.fc2 = nn.Linear(fc1_dims, fc2_dims)
-        self.q = nn.Linear(fc2_dims, 1)  # State-Action Value ~ Q Value
+        # input_dims = obs_space_dims + action_space_dims
+        self.fc1 = nn.Linear(input_dims, fc1)
+        self.fc2 = nn.Linear(fc1, fc2)
+        self.q = nn.Linear(fc2, 1)
 
-        # Adam Optimizer
-        self.optimizer = optim.Adam(self.parameters(), lr=self.beta)
+        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         self.device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
         self.to(self.device)
 
-    # Concatanate State and Action in first layer
-    def forward(self, state, action):
-        state_action_value = F.relu(self.fc1(T.cat([state, action], 1)))
+    def forward(self, state: T.Tensor, action: T.Tensor) -> T.Tensor:
+        # There are many variations of the critic network in DDPG, I went with the TD3 style
+        state_action_value = F.relu(self.fc1(T.cat([state, action], dim=1)))
         state_action_value = F.relu(self.fc2(state_action_value))
         return self.q(state_action_value)
 
@@ -41,34 +51,43 @@ class CriticNetwork(nn.Module):
 
 
 class ActorNetwork(nn.Module):
+    """
+    Actor Network for DDPG, determines the best action to take given a state.
+    """
+
     def __init__(
-        self, input_dims, fc1_dims, fc2_dims, n_actions, max_action, alpha, name
+        self,
+        input_dims: int,
+        learning_rate: float,
+        fc1: int,
+        fc2: int,
+        n_actions: int,
+        max_actions: np.ndarray,
+        name: str = "actor",
+        checkpoint_dir: str = "models",
+        scenario: str = "unclassified",
     ):
         super(ActorNetwork, self).__init__()
-        self.alpha = alpha
-        self.chkpt_dir = (
-            "./src/active_slam_learning/active_slam_learning/learning/ddpg/models"
-        )
-        self.checkpoint_file = os.path.join(self.chkpt_dir, name + "_ddpg")
+        self.checkpoint_dir = Path(checkpoint_dir) / scenario
+        self.checkpoint_file = self.checkpoint_dir / (name + "_ddpg")
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        self.fc1 = nn.Linear(*input_dims, fc1_dims)
-        self.fc2 = nn.Linear(fc1_dims, fc2_dims)
-        self.mu = nn.Linear(fc2_dims, n_actions)
+        self.fc1 = nn.Linear(input_dims, fc1)
+        self.fc2 = nn.Linear(fc1, fc2)
+        self.mu = nn.Linear(fc2, n_actions)
 
-        # Adam Optimizer
-        self.optimizer = optim.Adam(self.parameters(), lr=self.alpha)
+        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
         self.device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
         self.to(self.device)
 
-        self.max_action = T.tensor(max_action, dtype=T.float, device=self.device)
+        self.max_actions = T.tensor(max_actions, dtype=T.float, device=self.device)
 
-    # Get Action from State
-    def forward(self, state):
+    def forward(self, state: T.Tensor) -> T.Tensor:
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
         x = T.tanh(self.mu(x))
-        return self.max_action * x
+        return self.max_actions * x
 
     def save_checkpoint(self):
         print("... saving checkpoint ...")

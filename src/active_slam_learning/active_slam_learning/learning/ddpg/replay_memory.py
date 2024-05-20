@@ -2,14 +2,17 @@ import numpy as np
 
 
 class ReplayBuffer:
+    """
+    Data structure to store agents memory
+    """
+
     def __init__(self, max_size, input_shape, n_actions):
-        print(input_shape)
         self.mem_size = max_size
         self.mem_counter = 0
-        self.state_memory = np.zeros((self.mem_size, *input_shape))
+        self.state_memory = np.zeros((self.mem_size, input_shape))
         self.action_memory = np.zeros((self.mem_size, n_actions))
         self.reward_memory = np.zeros((self.mem_size))
-        self.next_state_memory = np.zeros((self.mem_size, *input_shape))
+        self.next_state_memory = np.zeros((self.mem_size, input_shape))
         self.terminal_memory = np.zeros(self.mem_size, dtype=np.bool_)
 
     def store_transition(self, state, action, reward, new_state, terminal):
@@ -34,4 +37,4 @@ class ReplayBuffer:
         return states, actions, rewards, next_states, terminals
 
     def is_ready(self, batch_size):
-        return self.mem_counter > self.mem_size / 20
+        return self.mem_counter > batch_size
