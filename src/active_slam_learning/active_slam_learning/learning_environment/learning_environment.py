@@ -1,3 +1,14 @@
+"""
+Module for simulating a learning environment in a single-robot system for RL using ROS2.
+
+This module defines a Learning Environment node which facilitates the interaction between
+a robot and a simulated environment. It manages the state updates, action processing,
+and reward calculation necessary for reinforcement learning experiments.
+
+Author: Theo Moore-Calters
+License: MIT
+"""
+
 import rclpy
 from rclpy.node import Node
 
@@ -13,7 +24,11 @@ from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist, PoseWithCovarianceStamped, Pose
 from active_slam_interfaces.srv import StepEnv, ResetEnv, ResetGazeboEnv
 
-from active_slam_learning.common.settings import INITIAL_POSE
+from active_slam_learning.common.settings import (
+    INITIAL_POSE,
+    NUMBER_OF_SCANS,
+    GOAL_PAD_RADIUS,
+)
 from active_slam_learning.learning_environment.reward_function import reward_function
 
 
@@ -25,7 +40,6 @@ class LearningEnvironment(Node):
 
         # -------- Initialise subscribers, publishers, clients and services ------- #
 
-        # Subscribers
         self.scan_subscriber = self.create_subscription(
             LaserScan, "/scan", self.scan_callback, 1
         )
@@ -41,23 +55,13 @@ class LearningEnvironment(Node):
             10,
         )
 
-        """
-        self.robot_position_reset_pose_subscriber = self.create_subscription(
-            Pose,
-            "/robot_position_reset_pose",
-            self.robot_position_reset_pose_callback,
-            10,
-        )
-        """
-
         self.odom_subscriber = self.create_subscription(
             Odometry, "/odom", self.odom_callback, 10
         )
 
-        # Publishers
         self.cmd_vel_publisher = self.create_publisher(Twist, "/cmd_vel", 10)
 
-        # Clients
+        # ----------------------- Clients ------------------------------------------- #
         self.initialise_gazebo_environment_client = self.create_client(
             Empty, "/initialise_gazebo_environment"
         )
@@ -91,23 +95,25 @@ class LearningEnvironment(Node):
         # Robot CONSTANTS
         self.MAX_LINEAR_SPEED = 0.22
         self.MAX_ANGULAR_SPEED = 2.0
-        self.NUMBER_OF_SCANS = 90
+        self.NUMBER_OF_SCANS = NUMBER_OF_SCANS
         self.MAX_SCAN_DISTANCE = 3.5
         self.INITIAL_POSE = INITIAL_POSE
 
         # Robot Variables
         self.collided = False
         self.found_goal = False
-        self.actual_pose = self.INITIAL_POSE  # The actual Pose of the robot
-        self.current_pose = self.INITIAL_POSE  # Estimated Pose using SLAM
-        self.current_scan = np.ones(self.NUMBER_OF_SCANS, dtype=np.float32) * 2
+
+        self.actual_pose = np.full(2, None, dtype=np.float32)
+        self.estimated_pose = np.full(2, None, dtype=np.float32)
+
+        self.scan = np.ones(self.NUMBER_OF_SCANS, dtype=np.float32) * 2
         self.current_d_optimality = None
         self.current_linear_velocity = 0.0
         self.current_angular_velocity = 0.0
 
         # Environment CONSTANTS
         self.MAX_STEPS = 1000
-        self.GOAL_DISTANCE = 0.25
+        self.GOAL_DISTANCE = GOAL_PAD_RADIUS
         self.COLLISION_DISTANCE = 0.18
 
         # Environment Variables
