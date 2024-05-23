@@ -28,10 +28,10 @@ def reward_function(
     # print("angular_vel_reward: {}".format(angular_vel_reward))
 
     # Negative Reward
-    collision_reward = -1000 if collided else 0
+    collision_reward = -100 if collided else 0
 
     # Positive Reward
-    goal_reward = 1000 if found_goal else 0
+    goal_reward = 100 if found_goal else 0
 
     # Positive Reward
     d_optimality_reward = np.tanh(eta / d_opt)

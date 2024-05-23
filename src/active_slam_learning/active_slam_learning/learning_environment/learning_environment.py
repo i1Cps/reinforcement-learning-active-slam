@@ -28,6 +28,8 @@ from active_slam_learning.common.settings import (
     INITIAL_POSE,
     NUMBER_OF_SCANS,
     GOAL_PAD_RADIUS,
+    MAX_CONTINUOUS_ACTIONS,
+    EPISODE_STEPS,
 )
 from active_slam_learning.learning_environment.reward_function import reward_function
 
@@ -93,30 +95,29 @@ class LearningEnvironment(Node):
         #################################################################
 
         # Robot CONSTANTS
-        self.MAX_LINEAR_SPEED = 0.22
-        self.MAX_ANGULAR_SPEED = 2.0
+        self.MAX_LINEAR_SPEED = MAX_CONTINUOUS_ACTIONS[0]
+        self.MAX_ANGULAR_SPEED = MAX_CONTINUOUS_ACTIONS[1]
+        # self.MAX_LINEAR_SPEED, self.MAX_ANGULAR_SPEED = MAX_CONTINUOUS_ACTIONS
         self.NUMBER_OF_SCANS = NUMBER_OF_SCANS
         self.MAX_SCAN_DISTANCE = 3.5
         self.INITIAL_POSE = INITIAL_POSE
 
-        # Robot Variables
-        self.collided = False
-        self.found_goal = False
-
-        self.actual_pose = np.full(2, None, dtype=np.float32)
-        self.estimated_pose = np.full(2, None, dtype=np.float32)
-
-        self.scan = np.ones(self.NUMBER_OF_SCANS, dtype=np.float32) * 2
-        self.current_d_optimality = None
-        self.current_linear_velocity = 0.0
-        self.current_angular_velocity = 0.0
-
         # Environment CONSTANTS
-        self.MAX_STEPS = 1000
+        self.MAX_STEPS = EPISODE_STEPS
         self.GOAL_DISTANCE = GOAL_PAD_RADIUS
         self.COLLISION_DISTANCE = 0.18
 
+        # Robot Variables
+        self.actual_pose = np.full(2, None, dtype=np.float32)
+        self.estimated_pose = np.full(2, None, dtype=np.float32)
+        self.scan = np.ones(self.NUMBER_OF_SCANS, dtype=np.float32) * 2
+        self.d_optimality = 0.01
+        self.linear_velocity = 0.0
+        self.angular_velocity = 0.0
+
         # Environment Variables
+        self.collided = False
+        self.found_goal = False
         self.done = False
         self.step_counter = 0
         self.goal_position = np.array([0.0, 0.0])
@@ -138,7 +139,7 @@ class LearningEnvironment(Node):
         self.get_logger().info("Sucessfully initialised Learning Environment Node")
 
     # Callback function for LiDAR scan subscriber
-    def scan_callback(self, data):
+    def scan_callback(self, data: LaserScan):
         scan = np.empty(len(data.ranges), dtype=np.float32)
         # Resize scan data, data itself returns extra info about the scan, scan.ranges just gets.... the ranges
         for i in range(len(data.ranges)):
@@ -148,7 +149,7 @@ class LearningEnvironment(Node):
                 scan[i] = 0
             else:
                 scan[i] = data.ranges[i]
-        self.current_scan = scan
+        self.scan = scan
 
     def odom_callback(self, data):
         self.actual_pose[0] = data.pose.pose.position.x
@@ -169,7 +170,7 @@ class LearningEnvironment(Node):
         )
 
     # Callback function for covariance matrix subscriber
-    def covariance_matrix_callback(self, data):
+    def covariance_matrix_callback(self, data: PoseWithCovarianceStamped):
         # Get D-Optimality
         EIG_TH = 1e-6  # or any threshold value you choose
         data = data.pose
@@ -181,15 +182,15 @@ class LearningEnvironment(Node):
         eigv = eigenvalues[eigenvalues > EIG_TH]
         n = np.size(covariance_matrix, 1)
         d_optimality = np.exp(np.sum(np.log(eigv)) / n)
-        self.current_d_optimality = d_optimality
+        self.d_optimality = d_optimality
 
         # SLam toolbox gets excited at the start pf episodes sometimes
-        if self.step_counter < 20 and self.current_d_optimality == 1:
-            self.current_d_optimality = 0.01
+        if self.step_counter < 20 and self.d_optimality == 1:
+            self.d_optimality = 0.01
 
         # Get Pose
         pose = data.pose
-        self.current_pose = np.array([pose.position.x, pose.position.y])
+        self.estimated_pose = np.array([pose.position.x, pose.position.y])
 
     def goal_position_reset_pose_callback(self, data):
         self.goal_position[0] = data.position.x
@@ -206,12 +207,14 @@ class LearningEnvironment(Node):
 
     def reset_callback(self, request, response):
         # Reset robot variables to prevent reset loop
-        self.current_scan = np.ones(self.NUMBER_OF_SCANS, dtype=np.float32) * 2
-        self.current_pose = None
-        self.actual_pose = None
-        self.current_d_optimality = 0.01
-        self.current_linear_velocity = 0.0
-        self.current_angular_velocity = 0.0
+        self.scan = (
+            np.ones(self.NUMBER_OF_SCANS, dtype=np.float32) * self.MAX_SCAN_DISTANCE
+        )
+        self.estimated_pose = np.full(2, None, dtype=object)
+        self.actual_pose = np.full(2, None, dtype=object)
+        self.d_optimality = 0.01
+        self.linear_velocity = 0.0
+        self.angular_velocity = 0.0
         self.step_counter = 0
         req = ResetGazeboEnv.Request()
         while not self.environment_reset_client.wait_for_service(timeout_sec=1.0):
@@ -220,19 +223,19 @@ class LearningEnvironment(Node):
             )
         future = self.sub_client.call_async(req)
         rclpy.spin_until_future_complete(self.sub_node, future)
-        pose: ResetGazeboEnv.Response = future.result()
-        self.current_pose = [pose.pose.position.x, pose.pose.position.y]
-        self.actual_pose = [pose.pose.position.x, pose.pose.position.y]
+        future_result: ResetGazeboEnv.Response = future.result()
+        new_pose = future_result.pose
+        self.estimated_pose = [new_pose.position.x, new_pose.position.y]
+        self.actual_pose = [new_pose.position.x, new_pose.position.y]
         self.done = False
         self.truncated = False
         self.collided = False
         response.observation = np.concatenate(
             (
-                self.current_scan,
-                self.current_pose,
-                np.array([self.current_d_optimality * 10]),
-            ),
-            dtype=np.float32,
+                self.scan.astype(np.float32),
+                self.estimated_pose.astype(np.float32),
+                np.array([self.d_optimality * 10], dtype=np.float32),
+            )
         )
         time.sleep(2)
         # TODO: Use ros approved variation of time.sleep()
@@ -295,9 +298,9 @@ class LearningEnvironment(Node):
         self.handle_found_goal(found_goal)
         observation = np.concatenate(
             (
-                self.current_scan,
-                self.current_pose,
-                np.array([self.current_d_optimality * 10]),
+                self.scan,
+                self.estimated_pose,
+                np.array([self.d_optimality * 10]),
             ),
             dtype=np.float32,
         )
@@ -305,9 +308,9 @@ class LearningEnvironment(Node):
         response.reward = self.get_rewards(
             found_goal,
             collided,
-            self.current_angular_velocity,
-            self.current_linear_velocity,
-            self.current_d_optimality,
+            self.angular_velocity,
+            self.linear_velocity,
+            self.d_optimality,
         )
         response.truncated = self.truncated
         response.done = self.done
@@ -318,15 +321,11 @@ class LearningEnvironment(Node):
     # Very simular to typical step function in normal Reinforcement Learning environments.
     def environment_step_callback(self, request, response):
         self.step_counter += 1
-        # self.current_linear_velocity = request.actions[0] * self.MAX_LINEAR_SPEED
-        # self.current_angular_velocity = request.actions[1] * self.MAX_ANGULAR_SPEED
-        self.current_linear_velocity = request.actions[0]
-        self.current_angular_velocity = request.actions[1]
-        # if action_sum > 45:
-        # reward += -50
+        self.linear_velocity = request.actions[0]
+        self.angular_velocity = request.actions[1]
         desired_vel_cmd = Twist()
-        desired_vel_cmd.linear.x = self.current_linear_velocity.item()
-        desired_vel_cmd.angular.z = self.current_angular_velocity.item()
+        desired_vel_cmd.linear.x = self.linear_velocity.item()
+        desired_vel_cmd.angular.z = self.angular_velocity.item()
         self.cmd_vel_publisher.publish(desired_vel_cmd)
 
         # Let simulation play out for a bit before observing

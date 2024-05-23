@@ -118,11 +118,12 @@ class LearningDDPG(Node):
                     self.model.learn(self.memory)
                 score += reward
                 observation = next_obs
+            self.model.ou_noise.reset()
+            self.model.pink_noise.reset()
             self.score_history.append(score)
             self.step_history.append(self.total_steps)
             self.finish_episode(score)
 
-        x = [i + 1 for i in range(n_games)]
         np.save(
             "training_data/raw_data/mappo_scores.npy",
             np.array(self.score_history),

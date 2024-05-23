@@ -4,6 +4,10 @@ import torch as T
 import torch.nn as nn
 from active_slam_learning.learning.ddpg.replay_memory import ReplayBuffer
 from active_slam_learning.learning.ddpg.networks import ActorNetwork, CriticNetwork
+from active_slam_learning.learning.ddpg.noise import (
+    DifferentialDriveOUNoise,
+    DifferentialDrivePinkNoise,
+)
 
 
 class Agent:
@@ -36,6 +40,8 @@ class Agent:
         self.n_actions = n_actions
         self.max_actions = max_actions
         self.gamma = gamma
+
+        print(min_actions)
 
         self.actor = ActorNetwork(
             input_dims=actor_dims,
@@ -81,7 +87,27 @@ class Agent:
             scenario=scenario,
         )
 
-        # Set network params to equal each other
+        self.ou_noise = DifferentialDriveOUNoise(
+            mean=0,
+            theta=0.15,
+            sigma=0.2,
+            dt=0.01,
+            max_angular=max_actions[1],
+            min_angular=min_actions[1],
+            max_linear=max_actions[0],
+            min_linear=min_actions[0],
+        )
+
+        self.pink_noise = DifferentialDrivePinkNoise(
+            alpha=1,
+            steps=2000,
+            max_angular=max_actions[1],
+            min_angular=min_actions[1],
+            max_linear=max_actions[0],
+            min_linear=min_actions[0],
+        )
+
+        # Set network and target network weights to equal each other
         self.update_network_parameters(tau=1)
 
     def choose_action(self, observation: np.ndarray) -> np.ndarray:
@@ -99,6 +125,7 @@ class Agent:
 
     def choose_random_action(self) -> np.ndarray:
         # Generate action using purely gaussian noise
+        return self.ou_noise()
         return np.random.normal(0, self.max_actions * 0.25, size=self.n_actions).clip(
             -self.max_actions, self.max_actions
         )

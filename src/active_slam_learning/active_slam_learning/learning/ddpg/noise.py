@@ -1,62 +1,116 @@
-# This file contains all my noises, currently we just have OUNoise, I plan to add pink noise and brown noise maybe
 import numpy as np
 
 
-class OUNoise_1:
-    def __init__(self, mu, sigma=0.15, theta=0.2, dt=1e-2, x0=None):
+class OUNoise:
+    def __init__(self, size, mean=0.0, theta=0.15, sigma=0.2, dt=1e-2):
+        self.size = size
+        self.mean = mean
         self.theta = theta
-        self.mu = mu
         self.sigma = sigma
         self.dt = dt
-        self.x0 = x0
         self.reset()
+
+    def reset(self):
+        self.state = np.ones(self.size) * self.mean
 
     def __call__(self):
-        x = (
-            self.x_prev
-            + self.theta * (self.mu - self.x_prev) * self.dt
-            + self.sigma * np.sqrt(self.dt) * np.random.normal(size=self.mu.shape)
-        )
-        self.x_prev = x
-        return x
-
-    def reset(self):
-        self.x_prev = self.x0 if self.x0 is not None else np.zeros_like(self.mu)
-
-
-class OUNoise_2(object):
-    def __init__(
-        self,
-        action_space,
-        mu=0.0,
-        theta=0.15,
-        max_sigma=0.99,
-        min_sigma=0.01,
-        decay_period=1000000,
-    ):
-        self.mu = mu
-        self.theta = theta
-        self.sigma = max_sigma
-        self.max_sigma = max_sigma
-        self.min_sigma = min_sigma
-        self.decay_period = decay_period
-        self.action_dim = action_space
-        self.reset()
-
-    def reset(self):
-        self.state = np.ones(self.action_dim) * self.mu
-
-    def evolve_state(self):
         x = self.state
-        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(self.action_dim)
+        dx = self.theta * (self.mean - x) * self.dt + self.sigma * np.sqrt(
+            self.dt
+        ) * np.random.normal(size=self.size)
         self.state = x + dx
         return self.state
 
-    def get_noise(self, t=0):
-        ou_state = self.evolve_state()
-        decaying = float(float(t) / self.decay_period)
-        self.sigma = max(
-            self.sigma - (self.max_sigma - self.min_sigma) * min(1.0, decaying),
-            self.min_sigma,
+
+class PinkNoise:
+    def __init__(self, size, alpha=1):
+        self.size = size
+        self.alpha = alpha
+        self.reset()
+
+    def reset(self):
+        self.state = np.zeros(self.size)
+
+    def __call__(self):
+        white = np.random.normal(size=self.size)
+        pink = np.fft.irfft(
+            np.fft.rfft(white)
+            * (np.arange(self.size // 2 + 1) + 1) ** (-self.alpha / 2.0)
         )
-        return ou_state
+        self.state = pink[: self.size]
+        return self.state
+
+
+class DifferentialDriveOUNoise:
+    def __init__(
+        self,
+        action_size=2,
+        mean=0.0,
+        theta=0.15,
+        sigma=0.2,
+        dt=1e-2,
+        max_angular=2.2,
+        min_angular=-2.2,
+        max_linear=0.2,
+        min_linear=-0.2,
+    ):
+        self.angular_noise = OUNoise(1, mean, theta, sigma, dt)
+        self.linear_noise = OUNoise(1, mean, theta, sigma, dt)
+        self.max_angular = max_angular
+        self.min_angular = min_angular
+        self.max_linear = max_linear
+        self.min_linear = min_linear
+
+    def reset(self):
+        self.angular_noise.reset()
+        self.linear_noise.reset()
+
+    def __call__(self):
+        angular_noise = self.angular_noise()
+        linear_noise = self.linear_noise()
+        angular_noise = np.clip(angular_noise, self.min_angular, self.max_angular)
+        linear_noise = np.clip(linear_noise, self.min_linear, self.max_linear)
+        return np.array([linear_noise[0], angular_noise[0]])
+
+
+class DifferentialDrivePinkNoise:
+    def __init__(
+        self,
+        action_size=2,
+        alpha=1,
+        steps=2000,
+        max_angular=2.2,
+        min_angular=-2.2,
+        max_linear=0.2,
+        min_linear=-0.2,
+    ):
+        self.steps = steps
+        self.angular_noise = PinkNoise(steps, alpha)
+        self.linear_noise = PinkNoise(steps, alpha)
+        self.max_angular = max_angular
+        self.min_angular = min_angular
+        self.max_linear = max_linear
+        self.min_linear = min_linear
+
+    def reset(self):
+        self.angular_noise.reset()
+        self.linear_noise.reset()
+
+    def __call__(self, step):
+        angular_noise = self.angular_noise()[step]
+        linear_noise = self.linear_noise()[step]
+        angular_noise = np.clip(angular_noise, self.min_angular, self.max_angular)
+        linear_noise = np.clip(linear_noise, self.min_linear, self.max_linear)
+        return np.array([linear_noise, angular_noise])
+
+
+noise = DifferentialDriveOUNoise()
+action = noise()
+print(action)
+steps = 1000
+pink_noise = DifferentialDrivePinkNoise(steps=steps)
+
+actions_pink = np.zeros((steps, 2))
+
+for i in range(steps):
+    actions_pink[i] = pink_noise(i)
