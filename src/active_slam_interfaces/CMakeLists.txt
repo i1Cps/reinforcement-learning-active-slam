@@ -10,6 +10,8 @@ find_package(ament_cmake REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
+set(msg_files
+  "msg/InfoMsg.msg")
 set(srv_files
   "srv/StepEnv.srv"
   "srv/ResetEnv.srv"
@@ -30,6 +32,7 @@ if(BUILD_TESTING)
 endif()
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  ${msg_files}
   ${srv_files}
 )
 
