@@ -10,6 +10,7 @@ from active_slam_interfaces.srv import ResetGazeboEnv
 import math
 from geometry_msgs.msg import Pose, Point, Quaternion
 from slam_toolbox.srv import Reset
+from active_slam_learning.common.settings import ROBOT_NAME
 
 
 class GazeboBridge(Node):
@@ -84,6 +85,7 @@ class GazeboBridge(Node):
             "goal_pad",
             "model.sdf",
         )
+        self.ROBOT_NAME = ROBOT_NAME
 
     def setup_model_poses(self) -> None:
         # Possible spawn locations for the robot
@@ -211,7 +213,7 @@ class GazeboBridge(Node):
     def _reset_robot_pose(self) -> Pose:
         req = SetEntityState.Request()
         pose = self._generate_new_robot_poses()
-        req.state.name = "turtlebot3_burger"
+        req.state.name = self.ROBOT_NAME
         req.state.pose = pose
 
         self._wait_for_service(self.set_entity_state_client, "Set Entity State")
