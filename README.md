@@ -52,7 +52,7 @@ Designed for researchers and developers with an interest in robotics and machine
 
 #### active_slam_simulation package:
 
-* [`main_world.launch.py`](./main_world.launch.py): This file is a ROS2 launch file that currently starts up Gazebo Classic, our physics simulation engine. It also runs the robot state publisher, which handles broadcasting the robot's state and spawns the robot model in the simulation environment.
+* [`main_world.launch.py`](src/active_slam_simulation/launch/main_world.launch.py): This file is a ROS2 launch file that currently starts up Gazebo Classic, our physics simulation engine. It also runs the robot state publisher, which handles broadcasting the robot's state and spawns the robot model in the simulation environment.
 
 * [`slam.launch.py`](./slam.launch.py): This file launches the **SLAM toolbox**, which we use to perform Active SLAM. This allows us to calculate map certainty and, importantly, view estimated mappings of the environment while the robot explores. The SLAM_toolbox is managed and distributed by [Steve Macenski](https://www.steve.macenski.com/) and its GitHub repository can be found [here](https://github.com/SteveMacenski/slam_toolbox).
 
