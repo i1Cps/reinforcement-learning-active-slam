@@ -8,34 +8,37 @@ import numpy as np
 
 MAX_LINEAR_SPEED = 0.22
 MAX_ANGULAR_SPEED = 2.0
+MAX_SCAN_DISTANCE = 3.5
 NUMBER_OF_SCANS = 90
+COLLISION_DISTANCE = 0.18
 
 
 #########################################################
 #                   ENVIRONMENT SETTINGS                #
 #########################################################
 
-INITIAL_POSE = np.array([-2.0, -0.5])
-GOAL_PAD_RADIUS = 0.7
-MAX_CONTINUOUS_ACTIONS = np.array([MAX_LINEAR_SPEED, MAX_ANGULAR_SPEED])
-
-
-# Scans + Pose_x + Pose_y + D_Optimality
-ENVIRONMENT_OBSERVATION_SPACE = NUMBER_OF_SCANS + 3
+# Scans + Pose_x + Pose_y
+ENVIRONMENT_OBSERVATION_SPACE = NUMBER_OF_SCANS + 2
 ENVIRONMENT_ACTION_SPACE = 2  # Linear and Angular Speed
+MAX_CONTINUOUS_ACTIONS = np.array([MAX_LINEAR_SPEED, MAX_ANGULAR_SPEED])
+EPISODE_LENGTH_SEC = 60
+EPISODE_STEPS = 1000
+GOAL_PAD_RADIUS = 0.7
+REWARD_DEBUG = True
 
 #########################################################
 #            REINFORCEMENT LEARNING SETTINGS            #
 #########################################################
 
 # GLOBAL SETTINGS
-MAX_STEPS = 2_000_000
+LOAD_MODEL = False
+MODEL_PATH = "training_data/models/single_robot_exploration"
 MAX_MEMORY_SIZE = 1_000_000  # Adjust according to your system, I have 32GB RAM
 FRAME_BUFFER_DEPTH = 3
 FRAME_BUFFER_SKIP = 10
-RANDOM_STEPS = 5000
+RANDOM_STEPS = 25000
 TRAINING_EPISODES = 2000
-EPISODE_STEPS = 1000
+TRAINING_STEPS = 1_000_000
 
 # DDPG SETTINGS:
 ALPHA_DDPG = 0.0001
