@@ -10,9 +10,9 @@
 
 * [➤ :pencil: About The Project](#-pencil-about-the-project)
 	* [Packages](#packages)
-		* [active_slam_simulation](#active_slam_simulation)
-		* [active_slam_learning](#active_slam_learning)
-		* [active_slam_intefaces](#active_slam_intefaces)
+		* [active_slam_simulation:](#active_slam_simulation)
+		* [active_slam_learning:](#active_slam_learning)
+		* [active_slam_interfaces:](#active_slam_interfaces)
 		* [slam_toolbox](#slam_toolbox)
 * [➤ :hammer: Usage](#-hammer-usage)
 	* [Terminal Commands](#terminal-commands)
@@ -31,6 +31,7 @@
 	* [Reinforcement Learning Settings ](#reinforcement-learning-settings-)
 		* [Global Settings ](#global-settings-)
 		* [DDPG Settings ](#ddpg-settings-)
+* [➤ ➤ :hammer: Basic Installation](#--hammer-basic-installation)
 * [➤ :rocket: Dependencies](#-rocket-dependencies)
 * [➤ :coffee: Buy me a coffee](#-coffee-buy-me-a-coffee)
 * [➤ :scroll: Credits](#-scroll-credits)
@@ -49,26 +50,28 @@ At its core, this project seeks to bridge the gap between theoretical reinforcem
 Designed for researchers and developers with an interest in robotics and machine learning, this project provides a deep dive into how autonomous agents can learn to adapt and navigate independently, pushing the boundaries of robotic autonomy in exploration and mapping tasks.
 
 <p align="center">
-  <img src="media/example_video.gif" alt="Logo" width="650" height="auto" />
+  <img src="media/example_video.gif" alt="Logo" width="550" height="auto" />
 </p>
 
 ### Packages
 
-#### active_slam_simulation
+#### active_slam_simulation:
 
 To simulate our robotic environment, we create a custom training environment using gazebo classic, a physics engine simulator. This package is responsible for setting up Gazebo with custom maps and our robot model. It also starts up the SLAM algorithm from the slam toolbox.
 
-#### active_slam_learning
+#### active_slam_learning:
 
 To train our agent in our custom training environment we handle the logic in this package, It creates several nodes which communicate with each other as well as hosts the main reinforcement learning algorithms including the training loop
 
-#### active_slam_intefaces
+#### active_slam_interfaces:
 
 To allow all our nodes to communicate with each other, we use this package to establish msg and srv files which establish a protocol for sending and receiving information amongst the nodes
 
 #### slam_toolbox
 
-The SLAM_toolbox is managed and distributed by [Steve Macenski](https://www.steve.macenski.com/) and its GitHub repository can be found [here](https://github.com/SteveMacenski/slam_toolbox). It allows us to localise and map the robots environment which essentially is the basis behind this research
+The slam_toolbox is managed and distributed by [Steve Macenski](https://www.steve.macenski.com/) and its GitHub repository can be found [here](https://github.com/SteveMacenski/slam_toolbox). It allows us to localise and map the robots environment which essentially is the basis behind this research
+
+
 
 
 
@@ -78,11 +81,13 @@ The SLAM_toolbox is managed and distributed by [Steve Macenski](https://www.stev
 
 ### Terminal Commands
 
-I highly recommend running this with [TMUX](https://github.com/tmux/tmux/wiki). Tmux allows us to split the terminal into panes to view all the essential ROS2 processes simultaneously.
+I highly recommend running this with [TMUX](https://github.com/tmux/tmux/wiki). Tmux allows us to split the terminal into panes to view all the essential ROS2 processes simultaneously. `apt install tmux`
 
 <p align="center">
   <img src="media/tmux_image.png" alt="Logo" width="550" height="auto" />
 </p>
+
+After following the [basic installation](#basic-installation)
 
 Start tmux with:
 
@@ -299,6 +304,43 @@ The following settings and options are exposed to you:
 * `ACTOR_DDPG_FC2`: Number of units in the second fully connected layer of the actor (512) 
 * `CRITIC_DDPG_FC1`: Number of units in the first fully connected layer of the critic (512) 
 * `CRITIC_DDPG_FC2`: Number of units in the second fully connected layer of the critic (512) 
+
+
+[![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/solar.png)](#-hammer-basic-installation)
+
+## ➤ ➤ :hammer: Basic Installation
+
+ **Install Ubuntu 22.04 OS**
+
+**Install [ROS2 Humble](https://docs.ros.org/en/humble/Installation.html)**
+
+**Download workspace**
+```
+git clone https://github.com/i1Cps/reinforcement-learning-active-slam.git
+
+cd reinforcement-learning-active-slam
+```
+
+**Build workspace (Could take a few minutes)**
+```
+colcon build --symlink-install
+```
+
+**Change ROS2 DDS implementation**
+```
+sudo apt install ros-humble-rmw-cyclonedds-cpp
+echo 'export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp' >> ~/.bashrc
+```
+
+**Install package dependencies**
+```
+sudo rosdep init
+rosdep update
+rosdep install -i --from-path src --rosdistro humble -y
+pip install setuptools==58.2.0
+colcon build --symlink-install
+```
+
 
 
 [![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/solar.png)](#rocket-dependencies)
