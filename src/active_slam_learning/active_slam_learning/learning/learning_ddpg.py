@@ -1,20 +1,24 @@
+from pathlib import Path
+import time
 import torch as T
 import rclpy
 from rclpy.node import Node
 
 import numpy as np
 
-from std_msgs.msg import Bool
+from std_srvs.srv import Empty
+
 from active_slam_interfaces.srv import StepEnv, ResetEnv
 from active_slam_learning.learning.ddpg.agent import Agent
-from active_slam_learning.learning.ddpg.utils import plot_learning_curve
 from active_slam_learning.common import utilities as util
 from active_slam_learning.learning.ddpg.replay_memory import ReplayBuffer
 from active_slam_learning.common.settings import (
+    MODEL_PATH,
     BETA_DDPG,
     ALPHA_DDPG,
     BATCH_SIZE_DDPG,
-    ENVIRONMENT_ACTION_SPACE,
+    FRAME_BUFFER_DEPTH,
+    FRAME_BUFFER_SKIP,
     TAU,
     GAMMA_DDPG,
     ACTOR_DDPG_FC1,
@@ -25,26 +29,75 @@ from active_slam_learning.common.settings import (
     RANDOM_STEPS,
     MAX_CONTINUOUS_ACTIONS,
     ENVIRONMENT_OBSERVATION_SPACE,
+    ENVIRONMENT_ACTION_SPACE,
+    MAX_SCAN_DISTANCE,
     TRAINING_EPISODES,
+    TRAINING_STEPS,
+    LOAD_MODEL,
 )
 
 
 class LearningDDPG(Node):
     def __init__(self):
         super().__init__("learning_ddpg")
+
+        self.initialise_parameters()
+        self.model = self.initialise_model()
+        self.memory = self.initialise_memory()
+        self.initialise_clients()
+
+        # Check for GPU availability
+        self.get_logger().info(
+            "GPU AVAILABLE" if T.cuda.is_available() else "WARNING GPU UNAVAILABLE"
+        )
+
+        # Start Reinforcement Learning
+        self.start_training()
+        # Save data
+        self.save_training_data()
+
+    def initialise_parameters(self):
         self.episode_number = 0
-        self.best_score = 0
         self.total_steps = 0
-        self.score_history, self.step_history = [], []
 
+        self.score_history = []
+        self.step_history = []
+        self.goal_history = []
+        self.collision_history = []
+        self.best_score = -np.Infinity
+
+        self.training_start_time = time.perf_counter()
         self.training_episodes = TRAINING_EPISODES
-        self.training = True
-        self.model_is_learning = False
+        self.training_steps = TRAINING_STEPS
+        self.load_model = LOAD_MODEL
 
-        self.actor_dims = ENVIRONMENT_OBSERVATION_SPACE
-        self.critic_dims = ENVIRONMENT_OBSERVATION_SPACE + ENVIRONMENT_ACTION_SPACE
+        # Create Directory in user system
+        self.model_path = Path(MODEL_PATH)
+        self.model_path.mkdir(parents=True, exist_ok=True)
 
-        self.model = Agent(
+        # Frame stacking
+        self.stack_depth = FRAME_BUFFER_DEPTH
+        self.frame_skip = FRAME_BUFFER_SKIP
+        self.current_frame = 0
+        self.frame_buffer = np.full(
+            (self.stack_depth * ENVIRONMENT_OBSERVATION_SPACE),
+            MAX_SCAN_DISTANCE,
+            dtype=np.float32,
+        )
+
+        # Network Dimensions
+        self.actor_dims = ENVIRONMENT_OBSERVATION_SPACE * self.stack_depth
+        self.critic_dims = (
+            ENVIRONMENT_OBSERVATION_SPACE * self.stack_depth + ENVIRONMENT_ACTION_SPACE
+        )
+
+        # Reward normalisation
+        self.reward_mean = 0
+        self.reward_var = 1
+        self.reward_count = 1
+
+    def initialise_model(self) -> Agent:
+        return Agent(
             actor_dims=self.actor_dims,
             critic_dims=self.critic_dims,
             n_actions=ENVIRONMENT_ACTION_SPACE,
@@ -59,99 +112,158 @@ class LearningDDPG(Node):
             critic_fc1=CRITIC_DDPG_FC1,
             critic_fc2=CRITIC_DDPG_FC2,
             batch_size=BATCH_SIZE_DDPG,
-            checkpoint_dir="training_data/models",
-            scenario="robotic_exploration",
         )
 
-        self.memory = ReplayBuffer(
-            MAX_MEMORY_SIZE, ENVIRONMENT_OBSERVATION_SPACE, ENVIRONMENT_ACTION_SPACE
+    def initialise_memory(self) -> ReplayBuffer:
+        return ReplayBuffer(
+            MAX_MEMORY_SIZE,
+            ENVIRONMENT_OBSERVATION_SPACE * self.stack_depth,
+            ENVIRONMENT_ACTION_SPACE,
         )
 
-        # Reward normalization variables
-        self.reward_mean = 0
-        self.reward_var = 1
-        self.reward_count = 1
-
-        # --------------------- Clients ---------------------------#
-
-        self.environment_step_client = self.create_client(StepEnv, "/environment_step")
+    def initialise_clients(self) -> None:
+        self.step_environment_client = self.create_client(StepEnv, "/step_environment")
         self.reset_environment_client = self.create_client(
-            ResetEnv, "/reset_environment_rl"
+            ResetEnv, "/reset_environment"
         )
-
-        # Check for GPU availability
-        self.get_logger().info(
-            "GPU AVAILABLE" if T.cuda.is_available() else "GPU UNAVAILABLE"
+        self.skip_environment_frame_client = self.create_client(
+            Empty, "/skip_environment_frame"
         )
-
-        # Start Reinforcement Learning
-        self.get_logger().info("Starting the learning loop")
-        self.start(self.training_episodes)
 
     # Main learning loop
-    def start(self, n_games):
-        for _ in range(n_games):
+    def start_training(self):
+        self.get_logger().info("Starting the Reinforcement Learning")
+        self.current_frame += 1
+        while self.total_steps < self.training_steps:
             # Reset episode
             observation = util.reset(self)
+
+            # Prepare frame buffer
+            self.frame_buffer.fill(MAX_SCAN_DISTANCE)
+            _ = self.update_frame_buffer(observation)
+
+            current_frame = 0
             done = False
             score = 0
+            goals_found = 0
+            action = self.model.choose_random_action()
+
             while not done:
-                if self.total_steps < RANDOM_STEPS:
-                    action = self.model.choose_random_action()
+                current_frame += 1
+                if current_frame % self.frame_skip == 0:
+                    # Choose actions
+                    if self.total_steps < RANDOM_STEPS:
+                        action = self.model.choose_random_action()
+                    else:
+                        action = self.model.choose_action(self.frame_buffer)
+
+                    # Step the environment
+                    next_obs, reward, terminal, truncated, info = util.step(
+                        self, action
+                    )
+
+                    # bookkeep goals found per episode
+                    goals_found += info["goal_found"]
+
+                    # Check for episode termination
+                    done = terminal or truncated
+                    self.collision_history.append(int(terminal))
+
+                    # Normalize reward
+                    self.update_reward_statistics(reward)
+                    norm_reward = (reward - self.reward_mean) / (
+                        self.reward_var**0.5 + 1e-5
+                    )
+
+                    # Store the current state of the buffer
+                    current_frame_buffer = self.frame_buffer.copy()
+                    # Update the frame buffer with next_obs and store it too
+                    next_frame_buffer = self.update_frame_buffer(next_obs)
+
+                    # Store the transition in a memory buffer for sampling
+                    self.memory.store_transition(
+                        state=current_frame_buffer,
+                        action=action,
+                        reward=norm_reward,
+                        new_state=next_frame_buffer,
+                        terminal=done,
+                    )
+
+                    # Learn
+                    if self.total_steps >= RANDOM_STEPS:
+                        self.model.learn(self.memory)
+
+                    # Accumulate rewards per step for each episode
+                    score += reward
+                    observation = next_obs
+                    self.total_steps += 1
                 else:
-                    action = self.model.choose_action(observation)
-                next_obs, reward, terminal, truncated = util.step(self, action)
-                self.total_steps += 1
-                done = terminal or truncated
+                    util.skip_frame(self)
+                    # Learn ~ DDPG is off-policy so agent can learn on skipped frames
+                    if self.total_steps >= RANDOM_STEPS:
+                        self.model.learn(self.memory)
 
-                # Normalize reward
-                self.update_reward_statistics(reward)
-                norm_reward = (reward - self.reward_mean) / (
-                    self.reward_var**0.5 + 1e-5
-                )
-
-                self.memory.store_transition(
-                    observation, action, norm_reward, next_obs, done
-                )
-
-                if self.total_steps >= RANDOM_STEPS:
-                    self.model.learn(self.memory)
-                score += reward
-                observation = next_obs
+            # Reset noise correlation per episode
             self.model.ou_noise.reset()
             self.model.pink_noise.reset()
-            self.score_history.append(score)
-            self.step_history.append(self.total_steps)
-            self.finish_episode(score)
 
+            # Bookkeep scores, goals and step history for plots
+            self.score_history.append(score)
+            self.goal_history.append(goals_found)
+            self.step_history.append(self.total_steps)
+
+            self.finish_episode(score, goals_found)
+
+    def save_training_data(self):
+        data_dir = Path("training_data/raw_data")
+        data_dir.mkdir(parents=True, exist_ok=True)
         np.save(
-            "training_data/raw_data/mappo_scores.npy",
+            data_dir / "ddpg_scores.npy",
             np.array(self.score_history),
         )
         np.save(
-            "training_data/raw_data/mappo_steps.npy",
+            data_dir / "ddpg_steps.npy",
             np.array(self.step_history),
         )
+        np.save(data_dir / "ddpg_goals_found.npy", np.array(self.goal_history))
+        np.save(data_dir / "ddpg_collision.npy", np.array(self.collision_history))
 
-    def update_reward_statistics(self, reward):
+        self.get_logger().info(
+            "Training has finished please plot raw results found in ../training_data/raw_data/ "
+        )
+
+    def update_reward_statistics(self, reward: float):
         # Incremental calculation of mean and variance
         self.reward_count += 1
         last_mean = self.reward_mean
         self.reward_mean += (reward - self.reward_mean) / self.reward_count
         self.reward_var += (reward - last_mean) * (reward - self.reward_mean)
 
+    def update_frame_buffer(self, observation):
+        self.frame_buffer = np.roll(self.frame_buffer, -ENVIRONMENT_OBSERVATION_SPACE)
+        self.frame_buffer[-ENVIRONMENT_OBSERVATION_SPACE:] = observation
+        return self.frame_buffer
+
     # Handles end of episode (nice, clean and modular)
-    def finish_episode(self, score):
+    def finish_episode(self, score, goals_found):
         self.episode_number += 1
+        episode_finish_time_sec = time.perf_counter() - self.training_start_time
+        episode_finish_time_min = episode_finish_time_sec / 60
+        episode_finish_time_hour = episode_finish_time_min / 60
         avg_score = np.mean(self.score_history[-100:])
-        if self.training:
-            if avg_score > self.best_score:
-                self.best_score = avg_score
-                self.model.save_models()
+        if avg_score > self.best_score:
+            self.best_score = avg_score
+            self.model.save(self.model_path)
 
         self.get_logger().info(
-            "Episode: {}, score: {}, Average Score: {:.1f}".format(
-                self.episode_number, score, avg_score
+            "Episode: {}, Steps: {}/{}, Training Time Elaspsed: {:.2f} \n Score: {:.2f}, Average Score: {:.2f}, Goals Found: {}".format(
+                self.episode_number,
+                self.total_steps,
+                self.training_steps,
+                episode_finish_time_min,
+                score,
+                avg_score,
+                goals_found,
             )
         )
 

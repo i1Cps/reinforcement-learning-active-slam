@@ -1,7 +1,7 @@
+import copy
 import numpy as np
 import torch.nn.functional as F
 import torch as T
-import torch.nn as nn
 from active_slam_learning.learning.ddpg.replay_memory import ReplayBuffer
 from active_slam_learning.learning.ddpg.networks import ActorNetwork, CriticNetwork
 from active_slam_learning.learning.ddpg.noise import (
@@ -27,21 +27,17 @@ class Agent:
         beta: float,
         tau: float,
         gamma: float = 0.99,
-        actor_fc1: int = 128,
-        actor_fc2: int = 128,
-        critic_fc1: int = 128,
-        critic_fc2: int = 128,
+        actor_fc1: int = 256,
+        actor_fc2: int = 256,
+        critic_fc1: int = 256,
+        critic_fc2: int = 256,
         batch_size: int = 64,
-        checkpoint_dir: str = "models",
-        scenario: str = "unclassified",
     ):
         self.tau = tau
         self.batch_size = batch_size
         self.n_actions = n_actions
         self.max_actions = max_actions
         self.gamma = gamma
-
-        print(min_actions)
 
         self.actor = ActorNetwork(
             input_dims=actor_dims,
@@ -50,9 +46,6 @@ class Agent:
             fc2=actor_fc2,
             n_actions=n_actions,
             max_actions=max_actions,
-            name="actor",
-            checkpoint_dir=checkpoint_dir,
-            scenario=scenario,
         )
 
         self.critic = CriticNetwork(
@@ -60,9 +53,6 @@ class Agent:
             learning_rate=beta,
             fc1=critic_fc1,
             fc2=critic_fc2,
-            name="critic",
-            checkpoint_dir=checkpoint_dir,
-            scenario=scenario,
         )
 
         self.target_actor = ActorNetwork(
@@ -72,9 +62,6 @@ class Agent:
             fc2=actor_fc2,
             n_actions=n_actions,
             max_actions=max_actions,
-            name="target_actor",
-            checkpoint_dir=checkpoint_dir,
-            scenario=scenario,
         )
 
         self.target_critic = CriticNetwork(
@@ -82,9 +69,6 @@ class Agent:
             learning_rate=beta,
             fc1=critic_fc1,
             fc2=critic_fc2,
-            name="target_critic",
-            checkpoint_dir=checkpoint_dir,
-            scenario=scenario,
         )
 
         self.ou_noise = DifferentialDriveOUNoise(
@@ -100,7 +84,7 @@ class Agent:
 
         self.pink_noise = DifferentialDrivePinkNoise(
             alpha=1,
-            steps=2000,
+            steps=5000,
             max_angular=max_actions[1],
             min_angular=min_actions[1],
             max_linear=max_actions[0],
@@ -118,17 +102,15 @@ class Agent:
             )
             # Generate actions using the actor network
             mu = self.actor.forward(state).to(self.actor.device).cpu().numpy()[0]
-            # Add gaussian noise
+            # Add pink noise
+            # noise = self.pink_noise() * 0.1
             noise = np.random.normal(0, self.max_actions * 0.1, size=self.n_actions)
             # Clip
             return (mu + noise).clip(-self.max_actions, self.max_actions)
 
     def choose_random_action(self) -> np.ndarray:
-        # Generate action using purely gaussian noise
+        # Generate action using Ornstein–Uhlenbeck noise
         return self.ou_noise()
-        return np.random.normal(0, self.max_actions * 0.25, size=self.n_actions).clip(
-            -self.max_actions, self.max_actions
-        )
 
     def learn(self, memory: ReplayBuffer):
         # Check if enough memory is in the buffer before sampling
@@ -194,14 +176,24 @@ class Agent:
         ):
             target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
-    def save_models(self):
-        self.actor.save_checkpoint()
-        self.target_actor.save_checkpoint()
-        self.critic.save_checkpoint()
-        self.target_critic.save_checkpoint()
+    def save(self, filepath) -> None:
+        T.save(self.actor.state_dict(), filepath / "ddpg_actor")
+        T.save(self.actor.optimizer.state_dict(), filepath / "ddpg_actor_optimiser")
 
-    def load_models(self):
-        self.actor.load_checkpoint()
-        self.target_actor.load_checkpoint()
-        self.critic.load_checkpoint()
-        self.target_critic.load_checkpoint()
+        T.save(self.critic.state_dict(), filepath / "ddpg_critic")
+        T.save(self.critic.optimizer.state_dict(), filepath / "ddpg_critic_optimiser")
+
+        print("... saving checkpoint ...")
+
+    def load(self, filepath) -> None:
+        self.actor.load_state_dict((T.load(filepath / "ddpg_actor")))
+        self.actor.optimizer.load_state_dict(T.load(filepath / "ddpg_actor_optimiser"))
+        self.target_actor = copy.deepcopy(self.actor)
+
+        self.critic.load_state_dict((T.load(filepath / "ddpg_critic")))
+        self.critic.optimizer.load_state_dict(
+            T.load(filepath / "ddpg_critic_optimiser")
+        )
+        self.target_critic = copy.deepcopy(self.critic)
+
+        print("... loading checkpoint ...")

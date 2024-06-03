@@ -1,4 +1,3 @@
-from pathlib import Path
 import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,14 +16,8 @@ class CriticNetwork(nn.Module):
         learning_rate: float,
         fc1: int,
         fc2: int,
-        name: str = "critic",
-        checkpoint_dir: str = "models",
-        scenario: str = "unclassified",
     ):
         super(CriticNetwork, self).__init__()
-        self.checkpoint_dir = Path(checkpoint_dir) / scenario
-        self.checkpoint_file = self.checkpoint_dir / (name + "_ddpg")
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         # input_dims = obs_space_dims + action_space_dims
         self.fc1 = nn.Linear(input_dims, fc1)
@@ -41,14 +34,6 @@ class CriticNetwork(nn.Module):
         state_action_value = F.relu(self.fc2(state_action_value))
         return self.q(state_action_value)
 
-    def save_checkpoint(self):
-        print("... saving checkpoint ...")
-        T.save(self.state_dict(), self.checkpoint_file)
-
-    def load_checkpoint(self):
-        print("... loading checkpoint ...")
-        self.load_state_dict(T.load(self.checkpoint_file))
-
 
 class ActorNetwork(nn.Module):
     """
@@ -63,14 +48,8 @@ class ActorNetwork(nn.Module):
         fc2: int,
         n_actions: int,
         max_actions: np.ndarray,
-        name: str = "actor",
-        checkpoint_dir: str = "models",
-        scenario: str = "unclassified",
     ):
         super(ActorNetwork, self).__init__()
-        self.checkpoint_dir = Path(checkpoint_dir) / scenario
-        self.checkpoint_file = self.checkpoint_dir / (name + "_ddpg")
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         self.fc1 = nn.Linear(input_dims, fc1)
         self.fc2 = nn.Linear(fc1, fc2)
@@ -88,11 +67,3 @@ class ActorNetwork(nn.Module):
         x = F.relu(self.fc2(x))
         x = T.tanh(self.mu(x))
         return self.max_actions * x
-
-    def save_checkpoint(self):
-        print("... saving checkpoint ...")
-        T.save(self.state_dict(), self.checkpoint_file)
-
-    def load_checkpoint(self):
-        print("... loading checkpoint ...")
-        self.load_state_dict(T.load(self.checkpoint_file))

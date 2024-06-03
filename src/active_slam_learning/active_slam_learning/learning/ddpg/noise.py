@@ -22,6 +22,7 @@ class OUNoise:
         return self.state
 
 
+# Under maintanece
 class PinkNoise:
     def __init__(self, size, alpha=1):
         self.size = size
@@ -73,12 +74,13 @@ class DifferentialDriveOUNoise:
         return np.array([linear_noise[0], angular_noise[0]])
 
 
+# Out of order
 class DifferentialDrivePinkNoise:
     def __init__(
         self,
         action_size=2,
         alpha=1,
-        steps=2000,
+        steps=5000,
         max_angular=2.2,
         min_angular=-2.2,
         max_linear=0.2,
@@ -91,26 +93,23 @@ class DifferentialDrivePinkNoise:
         self.min_angular = min_angular
         self.max_linear = max_linear
         self.min_linear = min_linear
+        self.current_step = 0  # Initialize step counter
 
     def reset(self):
         self.angular_noise.reset()
         self.linear_noise.reset()
+        self.current_step = 0  # Reset step counter
 
-    def __call__(self, step):
-        angular_noise = self.angular_noise()[step]
-        linear_noise = self.linear_noise()[step]
+    def __call__(self):
+        if self.current_step >= self.steps:
+            raise IndexError(
+                "Exceeded the number of pre-generated steps. Reset required."
+            )
+
+        angular_noise = self.angular_noise()[self.current_step]
+        linear_noise = self.linear_noise()[self.current_step]
         angular_noise = np.clip(angular_noise, self.min_angular, self.max_angular)
         linear_noise = np.clip(linear_noise, self.min_linear, self.max_linear)
+
+        self.current_step += 1  # Increment step counter
         return np.array([linear_noise, angular_noise])
-
-
-noise = DifferentialDriveOUNoise()
-action = noise()
-print(action)
-steps = 1000
-pink_noise = DifferentialDrivePinkNoise(steps=steps)
-
-actions_pink = np.zeros((steps, 2))
-
-for i in range(steps):
-    actions_pink[i] = pink_noise(i)
