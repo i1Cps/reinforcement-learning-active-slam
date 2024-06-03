@@ -87,7 +87,7 @@ I highly recommend running this with [TMUX](https://github.com/tmux/tmux/wiki). 
   <img src="media/tmux_image.png" alt="Logo" width="550" height="auto" />
 </p>
 
-After following the [basic installation](#-hammer-basic-installation)
+After following the [basic installation](#basic-installation)
 
 Start tmux with:
 
@@ -127,37 +127,37 @@ Launch the gazebo simulation physics engine with our robot model:
 
 ```
 source install/setup.bash
-ros2 launch active_slam_simulations main_world.launch.py
 tmux select-pane -t 4
+ros2 launch active_slam_simulations main_world.launch.py
 ```
 
 Next launch the SLAM algorithm from the slam toolbox:
 
 ```
 source install/setup.bash
-ros2 launch active_slam_simulations slam.launch.py
 tmux select-pane -t 5
+ros2 launch active_slam_simulations slam.launch.py
 ```
 
 Next run the Gazebo Bridge node:
 
 ```
 source install/setup.bash
-ros2 run active_slam_learning gazebo_bridge
 tmux select-pane -t 1
+ros2 run active_slam_learning gazebo_bridge
 ```
 Next run the Learning Environment node:
 ```
 source install/setup.bash
-ros2 run active_slam_learning learning_environment
 tmux select-pane -t 3
+ros2 run active_slam_learning learning_environment
 ```
 
 Startup RViz to see the map the robot generates per episode:
 ```
 source install/setup.bash
-ros2 launch active_slam_simulations view_map.launch.py
 tmux select-pane -t 0
+ros2 launch active_slam_simulations view_map.launch.py
 ```
 
 
