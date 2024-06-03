@@ -11,8 +11,10 @@
   <depend>active_slam_interfaces</depend>
   <depend>slam_toolbox</depend>
   <depend>navigation2</depend>
-  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>geometry_msgs</depend>
+  <depend>gazebo_ros_pkgs</depend>
 
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
