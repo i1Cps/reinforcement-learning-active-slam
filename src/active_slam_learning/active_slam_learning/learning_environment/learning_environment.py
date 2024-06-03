@@ -11,6 +11,8 @@ License: MIT
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile
+from rclpy.qos import ReliabilityPolicy
 
 import numpy as np
 import scipy
@@ -20,231 +22,290 @@ import math
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from std_srvs.srv import Empty
-from std_msgs.msg import Bool
+from rosgraph_msgs.msg import Clock
 from geometry_msgs.msg import Twist, PoseWithCovarianceStamped, Pose
 from active_slam_interfaces.srv import StepEnv, ResetEnv, ResetGazeboEnv
 
 from active_slam_learning.common.settings import (
-    INITIAL_POSE,
     NUMBER_OF_SCANS,
+    MAX_SCAN_DISTANCE,
     GOAL_PAD_RADIUS,
     MAX_CONTINUOUS_ACTIONS,
     EPISODE_STEPS,
+    EPISODE_LENGTH_SEC,
+    COLLISION_DISTANCE,
+    REWARD_DEBUG,
 )
 from active_slam_learning.learning_environment.reward_function import reward_function
 
 
-# This Node is reponsible for providing an interface for agents to take actions and recieve new states, rewards or both
-# Contains direct communication with our physics simulator, gazebo.
 class LearningEnvironment(Node):
+    """
+    Node responsible for providing an interface for agents to take actions and receive new states, rewards, or both.
+    Contains communication with Bridge Node which talks to the physics simulator, Gazebo.
+    """
+
     def __init__(self):
         super().__init__("learning_environment")
 
-        # -------- Initialise subscribers, publishers, clients and services ------- #
+        self._initialise_subscribers()
+        self._initialise_publishers()
+        self._initialise_clients()
+        self._initialise_services()
 
+        self._initialise_constants()
+        self._reset_robot_variables()
+        self._reset_environment_variables()
+
+        self._initialise_gazebo_bridge_node()
+
+    def _initialise_subscribers(self) -> None:
         self.scan_subscriber = self.create_subscription(
             LaserScan, "/scan", self.scan_callback, 1
         )
-
         self.covariance_matrix_subscriber = self.create_subscription(
             PoseWithCovarianceStamped, "/pose", self.covariance_matrix_callback, 10
         )
-
-        self.goal_position_reset_pose_subscriber = self.create_subscription(
+        self.goal_position_subscriber = self.create_subscription(
             Pose,
-            "/goal_position_reset_pose",
-            self.goal_position_reset_pose_callback,
+            "/goal_position",
+            self.goal_position_callback,
             10,
         )
-
         self.odom_subscriber = self.create_subscription(
             Odometry, "/odom", self.odom_callback, 10
         )
+        qos_clock = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            depth=1,
+        )
+        self.clock_subscriber = self.create_subscription(
+            Clock, "/clock", self.clock_callback, qos_profile=qos_clock
+        )
 
+    def _initialise_publishers(self) -> None:
         self.cmd_vel_publisher = self.create_publisher(Twist, "/cmd_vel", 10)
 
-        # ----------------------- Clients ------------------------------------------- #
-        self.initialise_gazebo_environment_client = self.create_client(
-            Empty, "/initialise_gazebo_environment"
+    def _initialise_clients(self) -> None:
+        self.gazebo_bridge_init_client = self.create_client(
+            Empty, "/gazebo_bridge_init"
         )
-
-        self.environment_success_client = self.create_client(
-            Empty, "/environment_success"
+        self.gazebo_bridge_success_client = self.create_client(
+            Empty, "/gazebo_bridge_success"
         )
-        self.environment_reset_client = self.create_client(
-            ResetGazeboEnv, "/environment_reset"
+        self.gazebo_bridge_reset_client = self.create_client(
+            ResetGazeboEnv, "/gazebo_bridge_reset"
         )
-
-        # -------------------------------- Services --------------------------------- #
-        self.environment_step = self.create_service(
-            StepEnv, "/environment_step", self.environment_step_callback
+        self.gazebo_bridge_pause_client = self.create_client(
+            Empty, "/gazebo_bridge_pause"
         )
-        self.reset_environment = self.create_service(
-            ResetEnv, "/reset_environment_rl", self.reset_callback
+        self.gazebo_bridge_unpause_client = self.create_client(
+            Empty, "/gazebo_bridge_unpause"
         )
-
-        # ------------------------------- ros style multi thread (lol) ---------------- #
-        # Sub Node to await request within a call back. At this point im a principle ROS engineer
+        # Sub Node for awaiting requests within a callback
         self.sub_node = rclpy.create_node("sub_node")
         self.sub_client = self.sub_node.create_client(
-            ResetGazeboEnv, "/environment_reset"
+            ResetGazeboEnv, "/gazebo_bridge_reset"
         )
 
-        #################################################################
-        #               CONSTANTS AND VARIABLES                         #
-        #################################################################
+    def _initialise_services(self) -> None:
+        self.step_environment_service = self.create_service(
+            StepEnv, "/step_environment", self.step_environment_callback
+        )
+        self.reset_environment_service = self.create_service(
+            ResetEnv, "/reset_environment", self.reset_environment_callback
+        )
+        self.skip_envionment_frame_service = self.create_service(
+            Empty,
+            "/skip_environment_frame",
+            self.skip_environment_frame_callback,
+        )
 
+    def _initialise_constants(self) -> None:
         # Robot CONSTANTS
-        self.MAX_LINEAR_SPEED = MAX_CONTINUOUS_ACTIONS[0]
-        self.MAX_ANGULAR_SPEED = MAX_CONTINUOUS_ACTIONS[1]
-        # self.MAX_LINEAR_SPEED, self.MAX_ANGULAR_SPEED = MAX_CONTINUOUS_ACTIONS
+        self.MAX_LINEAR_SPEED, self.MAX_ANGULAR_SPEED = MAX_CONTINUOUS_ACTIONS
         self.NUMBER_OF_SCANS = NUMBER_OF_SCANS
-        self.MAX_SCAN_DISTANCE = 3.5
-        self.INITIAL_POSE = INITIAL_POSE
+        self.MAX_SCAN_DISTANCE = MAX_SCAN_DISTANCE
 
         # Environment CONSTANTS
         self.MAX_STEPS = EPISODE_STEPS
         self.GOAL_DISTANCE = GOAL_PAD_RADIUS
-        self.COLLISION_DISTANCE = 0.18
+        self.COLLISION_DISTANCE = COLLISION_DISTANCE
+        self.EPISODE_LENGTH = EPISODE_LENGTH_SEC
 
+        # DEBUG
+        self.REWARD_DEBUG = REWARD_DEBUG
+
+    def _reset_robot_variables(self) -> None:
         # Robot Variables
         self.actual_pose = np.full(2, None, dtype=np.float32)
         self.estimated_pose = np.full(2, None, dtype=np.float32)
-        self.scan = np.ones(self.NUMBER_OF_SCANS, dtype=np.float32) * 2
-        self.d_optimality = 0.01
+        self.scan = (
+            np.ones(self.NUMBER_OF_SCANS, dtype=np.float32) * self.MAX_SCAN_DISTANCE
+        )
+        self.d_optimality = None
         self.linear_velocity = 0.0
         self.angular_velocity = 0.0
 
+    def _reset_environment_variables(self) -> None:
         # Environment Variables
         self.collided = False
-        self.found_goal = False
         self.done = False
+        self.found_goal = False
         self.step_counter = 0
+        self.goal_counter = 0
+        self.collision_counter = 0
         self.goal_position = np.array([0.0, 0.0])
         self.distance_to_goal = np.Inf
+        self.episode_end_time = np.Inf
+        self.reset_episode_end_time = True
+        self.clock_msgs_skipped = 0
+        self.current_time = 0
 
-        # DEBUG
-        self.reward_debug = True
-
-        ################################################################
-        #        Initialise Node
-        ####################################################
-
+    def _initialise_gazebo_bridge_node(self):
+        # Initialize the custom Gazebo Bridge Node
         req = Empty.Request()
-        while not self.initialise_gazebo_environment_client.wait_for_service(
-            timeout_sec=1.0
-        ):
-            self.get_logger().info("Waiting for initialise gazebo environment service")
-        self.initialise_gazebo_environment_client.call_async(req)
-        self.get_logger().info("Sucessfully initialised Learning Environment Node")
+        while not self.gazebo_bridge_init_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info("Waiting for gazebo bridge init service")
+        self.gazebo_bridge_init_client.call_async(req)
+        self.get_logger().info("Sucessfully initialised custom gazebo bridge node")
 
-    # Callback function for LiDAR scan subscriber
-    def scan_callback(self, data: LaserScan):
-        scan = np.empty(len(data.ranges), dtype=np.float32)
-        # Resize scan data, data itself returns extra info about the scan, scan.ranges just gets.... the ranges
-        for i in range(len(data.ranges)):
-            if data.ranges[i] == float("Inf"):
+    # Process incoming LiDAR scan data and update the scan attribute.
+    def scan_callback(self, msg: LaserScan):
+        scan = np.empty(len(msg.ranges), dtype=np.float32)
+        for i in range(len(msg.ranges)):
+            if msg.ranges[i] == float("Inf"):
                 scan[i] = self.MAX_SCAN_DISTANCE
-            elif np.isnan(data.ranges[i]):
+            elif np.isnan(msg.ranges[i]):
                 scan[i] = 0
             else:
-                scan[i] = data.ranges[i]
+                scan[i] = msg.ranges[i]
         self.scan = scan
 
-    def odom_callback(self, data):
-        self.actual_pose[0] = data.pose.pose.position.x
-        self.actual_pose[1] = data.pose.pose.position.y
+    # Handle environment clock and episode time length
+    def clock_callback(self, msg: Clock):
+        self.current_time = msg.clock.sec
+        if not self.reset_episode_end_time:
+            return
+
+        self.clock_msgs_skipped += 1
+        if self.clock_msgs_skipped <= 15:
+            return
+
+        self.episode_end_time = self.current_time + self.EPISODE_LENGTH
+        self.clock_msgs_skipped = 0
+        self.reset_episode_end_time = False
+
+    # Update the robot's actual position and distance to goal.
+    def odom_callback(self, msg: Odometry):
+        self.actual_pose[0] = msg.pose.pose.position.x
+        self.actual_pose[1] = msg.pose.pose.position.y
+        # Continuously update the robots distance to the goal
         self.distance_to_goal = np.sqrt(
             (self.goal_position[0] - self.actual_pose[0]) ** 2
             + (self.goal_position[1] - self.actual_pose[1]) ** 2
         )
-        # print(f"Actual Robot: {self.actual_pose[0]} , {self.actual_pose[1]}")
-        # print(f" goals pose: {self.goal_position[0]} , {self.goal_position[1]}")
-        # print(f"Distance to goal: {self.distance_to_goal}")
 
-    # Calculates yaw angle from quaternions, they deprecated Pose2D for some reason???? so this function is useless
-    def calculate_yaw(self, q_ang):
+    # Calculate yaw angle from quaternion orientation.
+    def calculate_yaw(self, q_ang) -> float:
         return math.atan2(
             2.0 * (q_ang.w * q_ang.z + q_ang.x * q_ang.y),
             1.0 - 2.0 * (q_ang.y**2 + q_ang.z**2),
         )
 
-    # Callback function for covariance matrix subscriber
-    def covariance_matrix_callback(self, data: PoseWithCovarianceStamped):
-        # Get D-Optimality
-        EIG_TH = 1e-6  # or any threshold value you choose
-        data = data.pose
+    # Compute D-optimality from covariance matrix and update estimated pose.
+    def covariance_matrix_callback(self, msg: PoseWithCovarianceStamped):
+        EIG_TH = 1e-6
+        LOW_UNCERTAINTY_VALUE = 1e-5  # Small value to indicate high uncertainty
+        data = msg.pose  # questionable msg type structure
+
+        # Extract the covariance matrix from the data
         matrix = data.covariance
         covariance_matrix = np.array(matrix).reshape((6, 6))
+
+        # Check if covariance matrix is close to an identity matrix
+        identity_covariance_matrix = False
+        identity_like_pattern = np.diag([1, 1, 0, 0, 0, 1])
+        if np.allclose(covariance_matrix, identity_like_pattern, atol=1e-2):
+            identity_covariance_matrix = True
+            covariance_matrix = np.diag([LOW_UNCERTAINTY_VALUE] * 6)
+
+        # Calculate eigenvalues
         eigenvalues = scipy.linalg.eigvalsh(covariance_matrix)
-        if np.iscomplex(eigenvalues.any()):
-            print("Error: Complex Root")
         eigv = eigenvalues[eigenvalues > EIG_TH]
-        n = np.size(covariance_matrix, 1)
-        d_optimality = np.exp(np.sum(np.log(eigv)) / n)
+
+        # Calculate D-optimality ~ SLAM toolbox throws identity matrix after map reset
+        if eigv.size == 0 or identity_covariance_matrix:
+            d_optimality = None
+        else:
+            n = np.size(covariance_matrix, 1)
+            d_optimality = np.exp(np.sum(np.log(eigv)) / n)
+
         self.d_optimality = d_optimality
-
-        # SLam toolbox gets excited at the start pf episodes sometimes
-        if self.step_counter < 20 and self.d_optimality == 1:
-            self.d_optimality = 0.01
-
-        # Get Pose
         pose = data.pose
         self.estimated_pose = np.array([pose.position.x, pose.position.y])
 
-    def goal_position_reset_pose_callback(self, data):
-        self.goal_position[0] = data.position.x
-        self.goal_position[1] = data.position.y
+    # Get updated goal pose
+    def goal_position_callback(self, msg: Pose):
+        self.goal_position[0] = msg.position.x
+        self.goal_position[1] = msg.position.y
         print(f"new goal pose: [ {self.goal_position[0]} , {self.goal_position[1]} ]")
 
-    """ Might use this instead of service for robot poses reset callback
-    def robot_position_reset_pose_callback(self, data):
-        print("heya")
-        self.current_pose = [data.position.x, data.position.y]
-        self.actual_pose = [data.position.x, data.position.y]
-        print(f"new robot pose: [{self.actual_pose[0]} , {self.actual_pose[1]}]")
-    """
+    # Reset robot and environment state
+    def reset_environment_callback(self, request, response):
+        self._unpause_environment()
 
-    def reset_callback(self, request, response):
-        # Reset robot variables to prevent reset loop
-        self.scan = (
-            np.ones(self.NUMBER_OF_SCANS, dtype=np.float32) * self.MAX_SCAN_DISTANCE
+        self._reset_robot_variables()
+        new_pose = self._get_new_robot_start_position()
+        self._reset_environment_variables()
+        # Get new robot start position
+        self.estimated_pose = np.array(
+            [new_pose.position.x, new_pose.position.y], dtype=np.float32
         )
-        self.estimated_pose = np.full(2, None, dtype=object)
-        self.actual_pose = np.full(2, None, dtype=object)
-        self.d_optimality = 0.01
-        self.linear_velocity = 0.0
-        self.angular_velocity = 0.0
-        self.step_counter = 0
+        self.actual_pose = np.array(
+            [new_pose.position.x, new_pose.position.y], dtype=np.float32
+        )
+
+        # Return environment observation
+        response.observation = np.concatenate(
+            (
+                self.scan,
+                self.estimated_pose,
+            )
+        )
+
+        # Allow time for gazebo bridge requests to complete
+        time.sleep(2)
+
+        self._pause_environment()
+
+        return response
+
+    def _get_new_robot_start_position(self):
+        # Communicate with custom gazebo bridge
         req = ResetGazeboEnv.Request()
-        while not self.environment_reset_client.wait_for_service(timeout_sec=1.0):
+        req.collision = self.collided
+        while not self.gazebo_bridge_reset_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(
-                "Environment reset service is not available, I'll wait"
+                "gazebo bridge reset service is not available, I'll wait"
             )
         future = self.sub_client.call_async(req)
         rclpy.spin_until_future_complete(self.sub_node, future)
         future_result: ResetGazeboEnv.Response = future.result()
-        new_pose = future_result.pose
-        self.estimated_pose = [new_pose.position.x, new_pose.position.y]
-        self.actual_pose = [new_pose.position.x, new_pose.position.y]
-        self.done = False
-        self.truncated = False
-        self.collided = False
-        response.observation = np.concatenate(
-            (
-                self.scan.astype(np.float32),
-                self.estimated_pose.astype(np.float32),
-                np.array([self.d_optimality * 10], dtype=np.float32),
-            )
-        )
-        time.sleep(2)
-        # TODO: Use ros approved variation of time.sleep()
-        # Pause execution
+        return future_result.pose
 
-        return response
+    def _pause_environment(self) -> None:
+        while not self.gazebo_bridge_pause_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info("gazebo bridge pause service not running")
+        self.gazebo_bridge_pause_client.call_async(Empty.Request())
 
-    # Calculates the rewards based on collisions, angular velocity and map certainty
-    def get_rewards(
+    def _unpause_environment(self) -> None:
+        while not self.gazebo_bridge_unpause_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info("gazebo bridge unpause service not running")
+        self.gazebo_bridge_unpause_client.call_async(Empty.Request())
+
+    # Calculate agent reward based on the state of the robot and environment.
+    def _get_rewards(
         self,
         found_goal: bool,
         collided: bool,
@@ -259,53 +320,63 @@ class LearningEnvironment(Node):
             linear_vel,
             d_opt,
             self.MAX_LINEAR_SPEED,
-            self.reward_debug,
+            self.REWARD_DEBUG,
         )
 
-    def stop_robots(self):
-        # Reset robots velocity
+    # Set robot velocities to zero.
+    def _stop_robot(self) -> None:
         desired_vel_cmd = Twist()
         desired_vel_cmd.linear.x = 0.0
         desired_vel_cmd.angular.z = 0.0
         self.cmd_vel_publisher.publish(Twist())
 
-    # Check if the given scan shows a collision
-    def has_collided(self):
-        return bool(self.COLLISION_DISTANCE > np.min(self.current_scan))
-
-    def has_found_goal(self):
-        return self.distance_to_goal < self.GOAL_DISTANCE
-
-    def handle_found_goal(self, found_goal):
+    # reset timer and spawn new goal object
+    def _handle_found_goal(self, found_goal: bool) -> None:
         if not found_goal:
             return
         self.step_counter = 0
+        self.goal_counter += 1
+        self.reset_episode_end_time = True
+        self.episode_end_time = np.Inf
         self.done = False
+        self.collided = False
         self.truncated = False
-        environment_success_req = Empty.Request()
-        while not self.environment_success_client.wait_for_service(timeout_sec=1.0):
+        bridge_success_req = Empty.Request()
+        while not self.gazebo_bridge_success_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(
-                "Environment success service is not available, I'll wait"
+                "gazebo bridge success service is not available, I'll wait"
             )
-        self.environment_success_client.call_async(environment_success_req)
+        self.gazebo_bridge_success_client.call_async(bridge_success_req)
 
-    # Populates the srv message response with obs,reward,truncated and, done
-    def get_step_response(self, response):
-        found_goal = self.has_found_goal() and self.step_counter > 130
-        collided = self.has_collided()
-        self.truncated = self.step_counter > self.MAX_STEPS
+    # Populate step response.
+    def _get_step_response(self, response):
+        found_goal = (
+            self.distance_to_goal < self.GOAL_DISTANCE and self.step_counter > 130
+        )
+
+        # Check smallest scan value to see if robot has collided
+        collided = bool(np.min(self.scan) < self.COLLISION_DISTANCE)
+        if collided:
+            self.collision_counter += 1
+
+        # Check environment clock
+        self.truncated = self.current_time > self.episode_end_time
         self.done = collided
-        self.handle_found_goal(found_goal)
+        self.collided = collided
+
+        self._handle_found_goal(found_goal)
+
+        # Build observation vector
         observation = np.concatenate(
             (
                 self.scan,
                 self.estimated_pose,
-                np.array([self.d_optimality * 10]),
             ),
             dtype=np.float32,
         )
+
         response.state = observation
-        response.reward = self.get_rewards(
+        response.reward = self._get_rewards(
             found_goal,
             collided,
             self.angular_velocity,
@@ -314,13 +385,18 @@ class LearningEnvironment(Node):
         )
         response.truncated = self.truncated
         response.done = self.done
+        response.info.goal_found = bool(found_goal)
+        response.info.collided = collided
+        response.info.distance_to_goal = self.distance_to_goal
         return response
 
-    # Agent will make a request to environment containing its chosen actions,
-    # Environment service will return new state that proceeds from said action
-    # Very simular to typical step function in normal Reinforcement Learning environments.
-    def environment_step_callback(self, request, response):
+    # Environment Step function callback
+    def step_environment_callback(self, request, response):
         self.step_counter += 1
+
+        self._unpause_environment()
+
+        # Apply action velocities
         self.linear_velocity = request.actions[0]
         self.angular_velocity = request.actions[1]
         desired_vel_cmd = Twist()
@@ -329,12 +405,23 @@ class LearningEnvironment(Node):
         self.cmd_vel_publisher.publish(desired_vel_cmd)
 
         # Let simulation play out for a bit before observing
-        time.sleep(0.1)
+        time.sleep(0.01)
+
+        self._pause_environment()
 
         # Return new state
-        response = self.get_step_response(response)
+        response = self._get_step_response(response)
         if self.done or self.truncated:
-            self.stop_robots()
+            self._stop_robot()
+            self.reset_episode_end_time = True
+            time.sleep(0.5)
+        return response
+
+    # Performs a step in the environment without collating information
+    def skip_environment_frame_callback(self, request, response):
+        self._unpause_environment()
+        time.sleep(0.01)
+        self._pause_environment()
         return response
 
 
