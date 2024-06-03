@@ -1,7 +1,5 @@
 import numpy as np
 
-# THIS FILE IS VERY MESSY, SORRY FOR NOW
-
 #########################################################
 #                   ROBOT SETTINGS                      #
 #########################################################
@@ -11,6 +9,7 @@ MAX_ANGULAR_SPEED = 2.0
 MAX_SCAN_DISTANCE = 3.5
 NUMBER_OF_SCANS = 90
 COLLISION_DISTANCE = 0.18
+ROBOT_NAME = "robot"
 
 
 #########################################################
