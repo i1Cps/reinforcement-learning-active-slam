@@ -31,7 +31,7 @@
 	* [Reinforcement Learning Settings ](#reinforcement-learning-settings-)
 		* [Global Settings ](#global-settings-)
 		* [DDPG Settings ](#ddpg-settings-)
-* [➤ ➤ :hammer: Basic Installation](#--hammer-basic-installation)
+* [➤ :hammer: Basic Installation](#-hammer-basic-installation)
 * [➤ :rocket: Dependencies](#-rocket-dependencies)
 * [➤ :coffee: Buy me a coffee](#-coffee-buy-me-a-coffee)
 * [➤ :scroll: Credits](#-scroll-credits)
@@ -87,7 +87,7 @@ I highly recommend running this with [TMUX](https://github.com/tmux/tmux/wiki). 
   <img src="media/tmux_image.png" alt="Logo" width="550" height="auto" />
 </p>
 
-After following the [basic installation](#basic-installation)
+After following the [basic installation](#-hammer-basic-installation)
 
 Start tmux with:
 
@@ -306,9 +306,9 @@ The following settings and options are exposed to you:
 * `CRITIC_DDPG_FC2`: Number of units in the second fully connected layer of the critic (512) 
 
 
-[![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/solar.png)](#-hammer-basic-installation)
+[![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/solar.png)](#hammer-basic-installation)
 
-## ➤ ➤ :hammer: Basic Installation
+## ➤ :hammer: Basic Installation
 
  **Install Ubuntu 22.04 OS**
 
