@@ -1,4 +1,4 @@
-<!-- ⚠️ This README has been generated from the file(s) "blueprint.md" ⚠️--><h1 align="center">reinforcement-active-slam</h1>
+<!-- ⚠️ This README has been generated from the file(s) "blueprint.md" ⚠️--><h1 align="center">reinforcement-learning-active-slam</h1>
 <p align="center">
   <img src="media/logo2.png" alt="Logo" width="550" height="auto" />
 </p>
@@ -9,7 +9,15 @@
 ## ➤ Table of Contents
 
 * [➤ :pencil: About The Project](#-pencil-about-the-project)
-* [➤ ➤ :floppy_disk: Key Project File Descriptions](#--floppy_disk-key-project-file-descriptions)
+	* [Packages](#packages)
+		* [active_slam_simulation](#active_slam_simulation)
+		* [active_slam_learning](#active_slam_learning)
+		* [active_slam_intefaces](#active_slam_intefaces)
+		* [slam_toolbox](#slam_toolbox)
+* [➤ :hammer: Usage](#-hammer-usage)
+	* [Terminal Commands](#terminal-commands)
+	* [Navigation in TMUX:](#navigation-in-tmux)
+* [➤ :floppy_disk: Key Project File Descriptions](#-floppy_disk-key-project-file-descriptions)
 	* [`Custom Environment Files`](#custom-environment-files)
 		* [active_slam_simulation package:](#active_slam_simulation-package)
 		* [active_slam_learning package:](#active_slam_learning-package)
@@ -24,8 +32,6 @@
 		* [Global Settings ](#global-settings-)
 		* [DDPG Settings ](#ddpg-settings-)
 * [➤ :rocket: Dependencies](#-rocket-dependencies)
-* [➤ :hammer: Usage](#-hammer-usage)
-		* [Navigation in TMUX:](#navigation-in-tmux)
 * [➤ :coffee: Buy me a coffee](#-coffee-buy-me-a-coffee)
 * [➤ :scroll: Credits](#-scroll-credits)
 * [➤ License](#-license)
@@ -36,17 +42,151 @@
 ## ➤ :pencil: About The Project
 --------------------------
 
-This repository explores and implements reinforcement learning strategies for active simultaneous localization and mapping (SLAM) using a single robot. The project integrates advanced machine learning algorithms, specifically Proximal Policy Optimization (PPO) and Deep Deterministic Policy Gradients (DDPG), enabling a robotic agent to autonomously explore and map unknown environments effectively.
+This repository explores and implements reinforcement learning strategies for active simultaneous localization and mapping (SLAM) using a single robot. The project integrates advanced reinforcement learning algorithms, specifically [Proximal Policy Optimization](https://arxiv.org/abs/1312.5602) (PPO) and [Deep Deterministic Policy Gradients](https://arxiv.org/abs/1509.02971) (DDPG), enabling a robotic agent to autonomously explore and map unknown environments effectively.
 
 At its core, this project seeks to bridge the gap between theoretical reinforcement learning and practical robotic applications. It focuses on creating a robust learning environment where the robot iteratively updates and adjusts its policy based on real-world dynamics. This approach applies various state-of-the-art reinforcement learning algorithms to enhance both the precision of the spatial maps generated and the efficiency of goal-based exploration in True Unknown Environments (TUE).
 
 Designed for researchers and developers with an interest in robotics and machine learning, this project provides a deep dive into how autonomous agents can learn to adapt and navigate independently, pushing the boundaries of robotic autonomy in exploration and mapping tasks.
 
+<p align="center">
+  <img src="media/example_video.gif" alt="Logo" width="650" height="auto" />
+</p>
+
+### Packages
+
+#### active_slam_simulation
+
+To simulate our robotic environment, we create a custom training environment using gazebo classic, a physics engine simulator. This package is responsible for setting up Gazebo with custom maps and our robot model. It also starts up the SLAM algorithm from the slam toolbox.
+
+#### active_slam_learning
+
+To train our agent in our custom training environment we handle the logic in this package, It creates several nodes which communicate with each other as well as hosts the main reinforcement learning algorithms including the training loop
+
+#### active_slam_intefaces
+
+To allow all our nodes to communicate with each other, we use this package to establish msg and srv files which establish a protocol for sending and receiving information amongst the nodes
+
+#### slam_toolbox
+
+The SLAM_toolbox is managed and distributed by [Steve Macenski](https://www.steve.macenski.com/) and its GitHub repository can be found [here](https://github.com/SteveMacenski/slam_toolbox). It allows us to localise and map the robots environment which essentially is the basis behind this research
 
 
-[![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/solar.png)](#-floppy_disk-key-project-file-descriptions)
 
-## ➤ ➤ :floppy_disk: Key Project File Descriptions
+[![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/solar.png)](#hammer-usage)
+
+## ➤ :hammer: Usage
+
+### Terminal Commands
+
+I highly recommend running this with [TMUX](https://github.com/tmux/tmux/wiki). Tmux allows us to split the terminal into panes to view all the essential ROS2 processes simultaneously.
+
+<p align="center">
+  <img src="media/tmux_image.png" alt="Logo" width="550" height="auto" />
+</p>
+
+Start tmux with:
+
+```
+tmux
+```
+
+First source ROS2 Humble with the command:
+
+```
+source /opt/ros/humble/setup.bash
+
+```
+
+Change into the workspace directory:
+
+```
+cd reinforcement-learning-active-slam
+```
+
+and run the following lines to split the panes:
+
+```
+tmux split-window -v -p 30
+tmux split-window -h -p 50
+tmux split-window -h -p 50 -t 0
+tmux split-window -v -p 50 -t 1
+tmux split-window -v -p 66
+tmux split-window -v -p 50
+tmux select-pane -t 6
+```
+
+***If you dont have tmux, you may create 5 seperate terminal windows instead***
+
+
+Launch the gazebo simulation physics engine with our robot model:
+
+```
+source install/setup.bash
+ros2 launch active_slam_simulations main_world.launch.py
+tmux select-pane -t 4
+```
+
+Next launch the SLAM algorithm from the slam toolbox:
+
+```
+source install/setup.bash
+ros2 launch active_slam_simulations slam.launch.py
+tmux select-pane -t 5
+```
+
+Next run the Gazebo Bridge node:
+
+```
+source install/setup.bash
+ros2 run active_slam_learning gazebo_bridge
+tmux select-pane -t 1
+```
+Next run the Learning Environment node:
+```
+source install/setup.bash
+ros2 run active_slam_learning learning_environment
+tmux select-pane -t 3
+```
+
+Startup RViz to see the map the robot generates per episode:
+```
+source install/setup.bash
+ros2 launch active_slam_simulations view_map.launch.py
+tmux select-pane -t 0
+```
+
+
+Lastly start the Learning node (**DDPG or PPO**):
+```
+source install/setup.bash
+ros2 run active_slam_learning learning_ddpg
+```
+
+### Navigation in TMUX:
+
+Please refer to this [cheatsheet](https://tmuxcheatsheet.com/) for more information but two heplful commands are:
+
+`ctrl+b o` ~ To switch to the next pane
+
+and 
+
+`ctrl+b z` ~ To zoom in and out of a pane
+
+
+
+
+
+
+
+
+
+ 
+
+
+
+[![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/solar.png)](#floppy_disk-key-project-file-descriptions)
+
+## ➤ :floppy_disk: Key Project File Descriptions
 
 ### `Custom Environment Files`
 
@@ -170,115 +310,6 @@ The following settings and options are exposed to you:
 
 [![ROS Badge](https://img.shields.io/badge/ROS-22314E?logo=ros&logoColor=fff&style=for-the-badge)](https://docs.ros.org/en/humble/index.html)[![Python Badge](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff&style=for-the-badge)](https://www.python.org/) [![PyTorch Badge](https://img.shields.io/badge/PyTorch-EE4C2C?logo=pytorch&logoColor=fff&style=for-the-badge)](https://pytorch.org/) [![NumPy Badge](https://img.shields.io/badge/NumPy-013243?logo=numpy&logoColor=fff&style=for-the-badge)](https://numpy.org/)[![Gazebo Badge](https://custom-icon-badges.demolab.com/badge/-GazeboSim-FFBF00?style=for-the-badge&logo=package&logoColor=black)](https://gazebosim.org/home)
 
-
-
-[![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/solar.png)](#hammer-usage)
-
-## ➤ :hammer: Usage
-
-I highly recommend running this with [TMUX](https://github.com/tmux/tmux/wiki). Tmux allows us to split the terminal into panes to view all the essential ROS2 processes simultaneously.
-
-<p align="center">
-  <img src="media/tmux_image.png" alt="Logo" width="550" height="auto" />
-</p>
-
-Start tmux with:
-
-```
-tmux
-```
-
-First source ROS2 Humble with the command:
-
-```
-source /opt/ros/humble/setup.bash
-
-```
-
-Change into the workspace directory:
-
-```
-cd reinforcement-learning-active-slam
-```
-
-and run the following lines to split the panes:
-
-```
-tmux split-window -v -p 30
-tmux split-window -h -p 50
-tmux split-window -h -p 50 -t 0
-tmux split-window -v -p 50 -t 1
-tmux split-window -v -p 66
-tmux split-window -v -p 50
-tmux select-pane -t 6
-```
-
-***If you dont have tmux, you may create 5 seperate terminal windows instead***
-
-
-Launch the gazebo simulation physics engine with our robot model:
-
-```
-source install/setup.bash
-ros2 launch active_slam_simulations main_world.launch.py
-tmux select-pane -t 4
-```
-
-Next launch the SLAM algorithm from the slam toolbox:
-
-```
-source install/setup.bash
-ros2 launch active_slam_simulations slam.launch.py
-tmux select-pane -t 5
-```
-
-Next run the Gazebo Bridge node:
-
-```
-source install/setup.bash
-ros2 run active_slam_learning gazebo_bridge
-tmux select-pane -t 1
-```
-Next run the Learning Environment node:
-```
-source install/setup.bash
-ros2 run active_slam_learning learning_environment
-tmux select-pane -t 3
-```
-
-Startup RViz to see the map the robot generates per episode:
-```
-source install/setup.bash
-ros2 launch active_slam_simulations view_map.launch.py
-tmux select-pane -t 0
-```
-
-
-Lastly start the Learning node (**DDPG or PPO**):
-```
-source install/setup.bash
-ros2 run active_slam_learning learning_ddpg
-```
-
-#### Navigation in TMUX:
-
-Please refer to this [cheatsheet](https://tmuxcheatsheet.com/) for more information but two heplful commands are:
-
-`ctrl+b o` ~ To switch to the next pane
-
-and 
-
-`ctrl+b z` ~ To zoom in and out of a pane
-
-
-
-
-
-
-
-
-
- 
 
 
 [![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/solar.png)](#coffee-buy-me-a-coffee)
