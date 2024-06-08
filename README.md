@@ -31,6 +31,7 @@
 	* [Reinforcement Learning Settings ](#reinforcement-learning-settings-)
 		* [Global Settings ](#global-settings-)
 		* [DDPG Settings ](#ddpg-settings-)
+		* [PPO Settings](#ppo-settings)
 * [➤ :hammer: Basic Installation](#-hammer-basic-installation)
 * [➤ :rocket: Dependencies](#-rocket-dependencies)
 * [➤ :coffee: Buy me a coffee](#-coffee-buy-me-a-coffee)
@@ -87,7 +88,7 @@ I highly recommend running this with [TMUX](https://github.com/tmux/tmux/wiki). 
   <img src="media/tmux_image.png" alt="Logo" width="550" height="auto" />
 </p>
 
-After following the [basic installation](#basic-installation)
+After following the [basic installation](#-hammer-basic-installation)
 
 Start tmux with:
 
@@ -167,6 +168,12 @@ source install/setup.bash
 ros2 run active_slam_learning learning_ddpg
 ```
 
+    or
+
+```
+ros2 run active_slam_learning learning_ppo
+```
+
 ### Navigation in TMUX:
 
 Please refer to this [cheatsheet](https://tmuxcheatsheet.com/) for more information but two heplful commands are:
@@ -186,6 +193,7 @@ and
 
 
  
+
 
 
 
@@ -216,7 +224,7 @@ and
 * [`reward_function.py`](src/active_slam_learning/active_slam_learning/learning_environment/reward_function.py): This file implements the reward function for the reinforcement learning (RL) agent:
 
      
-    * **Initial Reward**: The reward calculation's starting point is -0.2. 
+    * **Initial Reward**: The reward calculation's starting point is -0.4. 
     * **Linear Velocity Penalty**: Encourages the robot to maintain a higher linear velocity, calculated as -0.1 times the difference between the maximum speed and the current linear velocity. 
         
         ~ This ranges from -0.04 to 0 for linear velocities between -0.2 and 0.2. 
@@ -243,7 +251,7 @@ and
 
 #### DDPG
 
-* [`learning_ddpg.py`](src/active_slam_learning/active_slam_learning/learning/learning_ddpg.py): Facilitates the main training loop of the Deep Deterministic Policy Gradient algorithm, including Frame stacking, frame skipping, reward normalisation, initialising the model and the memory buffer, handling the scoring metrics per episode and lastly saving the training data for evaluation later.
+* [`learning_ddpg.py`](src/active_slam_learning/active_slam_learning/learning/learning_ddpg.py): Facilitates the main training loop of the [Deep Deterministic Policy Gradient](https://arxiv.org/abs/1509.02971) algorithm, including Frame stacking, frame skipping, reward normalisation, initialising the model and the memory buffer, handling the scoring metrics per episode and lastly saving the training data for evaluation later.
 
 * [`agent.py`](src/active_slam_learning/active_slam_learning/learning/ddpg/agent.py): Defines the main agent interacting with the environment. It encapsulates the logic for selecting actions, applying noise, learning and updating the policy.
 
@@ -254,13 +262,19 @@ and
 
 #### PPO
 
-Wait wait wait wait coming soon this that and the third
 
+* [`learning_ppo.py`](src/active_slam_learning/active_slam_learning/learning/learning_ppo.py): Facilitates the main training loop for the [Proximal Policy Optimization](https://arxiv.org/abs/1707.06347) (PPO) algorithm, including frame stacking, frame skipping, reward clipping, model and memory buffer initialiasation, episode scoring metrics, and training data saving for later evaluation. It handles the overall flow of the PPO training process.
+
+* [`agent.py`](src/active_slam_learning/active_slam_learning/learning/ppo/agent.py): Defines the main agent interacting with the environment. It encapsulates the logic for selecting actions, learning, and updating the policy using actor and critic networks. The agent implements the PPO update rule, which involves clipping probability ratios to ensure stable policy updates and maintaining entropy for exploration.
+
+* [`replay_memory.py`](src/active_slam_learning/active_slam_learning/learning/ddpg/replay_memory.py):  Implements the PPO memory buffer, storing experiences and enabling random sampling to stabilise training. It manages states, actions, rewards, next states, done flags, and action probabilities, facilitating mini-batch updates during learning.
+
+* [`networks.py`](src/active_slam_learning/active_slam_learning/learning/ddpg/networks.py): Defines the neural network architectures for the actor and critic models in PPO. The actor network uses Beta distributions for action sampling, ensuring a stochastic policy, while the critic network estimates state values to provide advantage estimates during training.
 
 
 #### COMMON
 
-* [`utilities.py`](src/active_slam_learning/active_slam_learning/common/utilities.py): Includes helper functions for communicating with the [learning environment node](src/active_slam_learning/active_slam_learning/learning_environment/learning_environment.py).
+* [`utilities.py`](src/active_slam_learning/active_slam_learning/common/utilities.py): Includes helper functions for communicating with the [learning environment node](src/active_slam_learning/active_slam_learning/learning_environment/learning_environment.py) and plotting functions.
 
 * [`settings.py`](src/active_slam_learning/active_slam_learning/common/settings.py): Contains all the configuration settings for the training process. Users can very much use this project by only ever changing this file
 
@@ -297,13 +311,31 @@ The following settings and options are exposed to you:
 #### DDPG Settings 
 * `ALPHA_DDPG`: Learning rate for the actor (0.0001) 
 * `BETA_DDPG`: Learning rate for the critic (0.0003) 
-* `TAU`: Soft update parameter (0.005) 
-* `GAMMA_DDPG`: Discount factor (0.99) 
-* `BATCH_SIZE_DDPG`: Batch size (100) 
 * `ACTOR_DDPG_FC1`: Number of units in the first fully connected layer of the actor (400) 
 * `ACTOR_DDPG_FC2`: Number of units in the second fully connected layer of the actor (512) 
 * `CRITIC_DDPG_FC1`: Number of units in the first fully connected layer of the critic (512) 
 * `CRITIC_DDPG_FC2`: Number of units in the second fully connected layer of the critic (512) 
+* `TAU`: Soft update parameter (0.005) 
+* `GAMMA_DDPG`: Discount factor for future rewards (0.99)
+* `BATCH_SIZE_DDPG`: Training batch size (100)
+
+
+#### PPO Settings
+* `ALPHA_MAAPO`: Learning rate for the actor (0.0001) 
+* `BETA_MAPPO`: Learning rate for the critic (0.003)
+* `ACTOR_PPO_FC1`: Number of units in the first fully connected layer of the actor (512)
+* `ACTOR_PPO_FC2`: Number of units in the second fully connected layer of the actor (512)
+* `CRITIC_PPO_FC1`: Number of units in the first fully connected layer of the critic (512)
+* `CRITIC_PPO_FC2`: Number of units in the second fully connected layer of the critic (512)
+* `POLICY_CLIP`: Clipping parameter for policy (0.2)
+* `GAMMA_PPO`: Discount factor for future rewards (0.99)
+* `TRAJECTORY`: Number of steps per trajectory (2048)
+* `NUM_MINI_BATCHES`: Number of mini-batches for training (64)
+* `N_EPOCHS`: Number of epochs per update (15)
+* `GAE_LAMBDA`: Generalized Advantage Estimation lambda (0.95)
+* `ENTROPY_COEFFICIENT`: Coefficient for entropy regularization (0.01)
+
+
 
 
 [![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/cloudy.png)](#hammer-basic-installation)
