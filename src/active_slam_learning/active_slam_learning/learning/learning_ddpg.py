@@ -53,6 +53,7 @@ class LearningDDPG(Node):
 
         # Start Reinforcement Learning
         self.start_training()
+        self.end_training()
         # Save data
         self.save_training_data()
 
@@ -78,7 +79,6 @@ class LearningDDPG(Node):
         # Frame stacking
         self.stack_depth = FRAME_BUFFER_DEPTH
         self.frame_skip = FRAME_BUFFER_SKIP
-        self.current_frame = 0
         self.frame_buffer = np.full(
             (self.stack_depth * ENVIRONMENT_OBSERVATION_SPACE),
             MAX_SCAN_DISTANCE,
@@ -97,7 +97,7 @@ class LearningDDPG(Node):
         self.reward_count = 1
 
     def initialise_model(self) -> Agent:
-        return Agent(
+        model = Agent(
             actor_dims=self.actor_dims,
             critic_dims=self.critic_dims,
             n_actions=ENVIRONMENT_ACTION_SPACE,
@@ -113,6 +113,10 @@ class LearningDDPG(Node):
             critic_fc2=CRITIC_DDPG_FC2,
             batch_size=BATCH_SIZE_DDPG,
         )
+
+        if self.load_model:
+            model.load(self.model_path)
+        return model
 
     def initialise_memory(self) -> ReplayBuffer:
         return ReplayBuffer(
@@ -133,7 +137,6 @@ class LearningDDPG(Node):
     # Main learning loop
     def start_training(self):
         self.get_logger().info("Starting the Reinforcement Learning")
-        self.current_frame += 1
         while self.total_steps < self.training_steps:
             # Reset episode
             observation = util.reset(self)
@@ -184,7 +187,7 @@ class LearningDDPG(Node):
                     self.memory.store_transition(
                         state=current_frame_buffer,
                         action=action,
-                        reward=norm_reward,
+                        reward=self.clip_reward(reward),
                         new_state=next_frame_buffer,
                         terminal=done,
                     )
@@ -214,36 +217,6 @@ class LearningDDPG(Node):
 
             self.finish_episode(score, goals_found)
 
-    def save_training_data(self):
-        data_dir = Path("training_data/raw_data")
-        data_dir.mkdir(parents=True, exist_ok=True)
-        np.save(
-            data_dir / "ddpg_scores.npy",
-            np.array(self.score_history),
-        )
-        np.save(
-            data_dir / "ddpg_steps.npy",
-            np.array(self.step_history),
-        )
-        np.save(data_dir / "ddpg_goals_found.npy", np.array(self.goal_history))
-        np.save(data_dir / "ddpg_collision.npy", np.array(self.collision_history))
-
-        self.get_logger().info(
-            "Training has finished please plot raw results found in ../training_data/raw_data/ "
-        )
-
-    def update_reward_statistics(self, reward: float):
-        # Incremental calculation of mean and variance
-        self.reward_count += 1
-        last_mean = self.reward_mean
-        self.reward_mean += (reward - self.reward_mean) / self.reward_count
-        self.reward_var += (reward - last_mean) * (reward - self.reward_mean)
-
-    def update_frame_buffer(self, observation):
-        self.frame_buffer = np.roll(self.frame_buffer, -ENVIRONMENT_OBSERVATION_SPACE)
-        self.frame_buffer[-ENVIRONMENT_OBSERVATION_SPACE:] = observation
-        return self.frame_buffer
-
     # Handles end of episode (nice, clean and modular)
     def finish_episode(self, score, goals_found):
         self.episode_number += 1
@@ -256,7 +229,7 @@ class LearningDDPG(Node):
             self.model.save(self.model_path)
 
         self.get_logger().info(
-            "Episode: {}, Steps: {}/{}, Training Time Elaspsed: {:.2f} \n Score: {:.2f}, Average Score: {:.2f}, Goals Found: {}".format(
+            "\nEpisode: {}, Steps: {}/{}, Training Time Elaspsed: {:.2f} \n Score: {:.2f}, Average Score: {:.2f}, Goals Found: {}".format(
                 self.episode_number,
                 self.total_steps,
                 self.training_steps,
@@ -265,6 +238,83 @@ class LearningDDPG(Node):
                 avg_score,
                 goals_found,
             )
+        )
+
+    def save_training_data(self):
+        raw_data_dir = Path("src/active_slam_learning/raw_data")
+        plot_dir = Path("src/active_slam_learning/plots")
+        raw_data_dir.mkdir(parents=True, exist_ok=True)
+        plot_dir.mkdir(parents=True, exist_ok=True)
+        np.save(
+            raw_data_dir / "ddpg_scores.npy",
+            np.array(self.score_history),
+        )
+        np.save(
+            raw_data_dir / "ddpg_steps.npy",
+            np.array(self.step_history),
+        )
+        np.save(raw_data_dir / "ddpg_goals_found.npy", np.array(self.goal_history))
+        np.save(raw_data_dir / "ddpg_collision.npy", np.array(self.collision_history))
+
+        self.get_logger().info(
+            "\n\n\nTraining has finished! raw data is available in the workspace src/training_data/raw_data/ "
+        )
+
+        # Plot the data
+        util.plot_training_data(
+            steps_file=raw_data_dir / "ddpg_steps.npy",
+            scores_file=raw_data_dir / "dppg_scores.npy",
+            goal_history_file=raw_data_dir / "ddpg_goals_found.npy",
+            learning_plot_filename=plot_dir / "ddpg_learning_plot",
+            goals_plot_filename=plot_dir / "ddpg_returns_plot",
+            goals_title="ddpg goals found",
+            learning_title="ddpg returns",
+        )
+
+    # Helper function for reward normalisation
+    def update_reward_statistics(self, reward: float):
+        # Incremental calculation of mean and variance
+        self.reward_count += 1
+        last_mean = self.reward_mean
+        self.reward_mean += (reward - self.reward_mean) / self.reward_count
+        self.reward_var += (reward - last_mean) * (reward - self.reward_mean)
+
+    # Drastically increases performance
+    def clip_reward(self, reward: float) -> float:
+        if reward < -10:
+            return -10
+        elif reward > 10:
+            return 10
+        else:
+            return reward
+
+    def update_frame_buffer(self, observation):
+        self.frame_buffer = np.roll(self.frame_buffer, -ENVIRONMENT_OBSERVATION_SPACE)
+        self.frame_buffer[-ENVIRONMENT_OBSERVATION_SPACE:] = observation
+        return self.frame_buffer
+
+    def end_training(self):
+        # Print results
+        print(
+            "\n\n\nResults: "
+            + "\nGoals found: {}".format(sum(self.goal_history))
+            + "\nCollisions:  {}".format(sum(self.collision_history))
+            + "\nBest Score:  {:.2f}".format(self.best_score)
+            + "\nTotal Time (hours): {:.2f}".format(
+                ((time.perf_counter() - self.training_start_time) / 60) / 60,
+            )
+        )
+
+        # Remind user of hyperparameters used
+        print(
+            "\n\nHyperparameters: "
+            + "\nAlpha: {}".format(ALPHA_DDPG)
+            + "\nBeta:  {}".format(BETA_DDPG)
+            + "\nTau:   {}".format(TAU)
+            + "\nGamma: {}".format(GAMMA_DDPG)
+            + "\nActor Fully Connected Dims:  {}".format(ACTOR_DDPG_FC1)
+            + "\nCritic Fully Connected Dims: {}".format(CRITIC_DDPG_FC1)
+            + "\nBatch Size: {}".format(BATCH_SIZE_DDPG)
         )
 
 
