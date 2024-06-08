@@ -2,6 +2,47 @@ import rclpy
 import numpy as np
 from std_srvs.srv import Empty
 from active_slam_interfaces.srv import StepEnv, ResetEnv
+import matplotlib.pyplot as plt
+
+
+def plot_training_data(
+    steps_file,
+    scores_file,
+    goal_history_file,
+    learning_plot_filename,
+    goals_plot_filename,
+    learning_title="Reinforcement Learning Algorithm Returns",
+    goals_title="Average Goals per Episode",
+):
+    # Plot learning curve
+    steps = np.load(steps_file)
+    scores = np.load(scores_file)
+    running_avg_scores = np.zeros(len(scores))
+    for i in range(len(running_avg_scores)):
+        running_avg_scores[i] = np.mean(scores[max(0, i - 100) : (i + 1)])
+
+    f1 = plt.figure("Learning Curve")  # Start a new figure
+    plt.plot(steps, running_avg_scores)
+    plt.title(learning_title)
+    plt.xlabel("Steps")
+    plt.ylabel("Scores")
+    plt.savefig(learning_plot_filename)
+
+    # Plot goals history
+    goal_history = np.load(goal_history_file)
+    running_avg_goals = np.zeros(len(goal_history))
+    for i in range(len(running_avg_goals)):
+        running_avg_goals[i] = np.mean(goal_history[max(0, i - 100) : (i + 1)])
+
+    f2 = plt.figure("Goals History")  # Start a new figure
+    plt.plot(running_avg_goals)
+    plt.title(goals_title)
+    plt.xlabel("Episode")
+    plt.ylabel("Average Goals")
+    plt.savefig(goals_plot_filename)
+
+    # Show all plots
+    plt.show()
 
 
 # Communicates to the Learning Environment Node that it should step the environment using these actions
