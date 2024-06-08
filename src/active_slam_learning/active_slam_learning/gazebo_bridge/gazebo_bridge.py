@@ -172,11 +172,14 @@ class GazeboBridge(Node):
 
         if request.collision:
             self.collision_counter += 1
-        self.get_logger().info(
-            "\n Robot has crashed, Resseting Gazebo, collision count is: {}".format(
-                self.collision_counter
+            self.get_logger().info(
+                "\n Robot has crashed, Resetting Gazebo, collision count is: {}".format(
+                    self.collision_counter
+                )
             )
-        )
+        else:
+            self.get_logger().info("Episode timeout, Resetting Gazebo")
+
         return response
 
     # Service callback to handle the event when the robot successfully finds the goal.
