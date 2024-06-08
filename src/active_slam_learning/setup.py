@@ -11,11 +11,9 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
-        (os.path.join("share", package_name, "config"), glob("config/*")),
-        (
-            os.path.join("share", package_name, "launch"),
-            glob(os.path.join("launch", "*launch.[pxy][yma]*")),
-        ),
+        (os.path.join("share", package_name, "config"), glob("plots/*")),
+        (os.path.join("share", package_name, "config"), glob("raw_data/*")),
+        (os.path.join("share", package_name, "config"), glob("models/*")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
