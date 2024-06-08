@@ -225,17 +225,17 @@ and
 
      
     * **Initial Reward**: The reward calculation's starting point is -0.4. 
-    * **Linear Velocity Penalty**: Encourages the robot to maintain a higher linear velocity, calculated as -0.1 times the difference between the maximum speed and the current linear velocity. 
+    * **Linear Velocity Penalty**: Encourages the robot to maintain a higher linear velocity, calculated as -3 times the difference between the maximum speed and the current linear velocity. 
         
-        ~ This ranges from -0.04 to 0 for linear velocities between -0.2 and 0.2. 
+        ~ This ranges from -1.2 to 0 for linear velocities between -0.2 and 0.2. 
         
-    * **Angular Velocity Penalty**: Penalises higher angular velocities, calculated as -0.01 times the square of the angular velocity. 
+    * **Angular Velocity Penalty**: Penalises higher angular velocities, calculated as -0.2 times the square of the angular velocity. 
     
-        ~ This ranges from -0.0484 to 0 for angular velocities between -2.2 and 2.2. 
+        ~ This ranges from -0.968 to 0 for angular velocities between -2.2 and 2.2. 
     
-    * **Collision Penalty**: Imposes a penalty of -1 if the robot collides with an obstacle. 
+    * **Collision Penalty**: Imposes a significant penalty of -1000 if the robot collides with an obstacle. 
     
-    * **Goal Reward**: Rewards the robot with 1 if it successfully finds the goal.  
+    * **Goal Reward**: Rewards the robot with 1000 if it successfully finds the goal.  
     * **Map Uncertainty Reward**: Provides a positive intrinsic reward based on the map uncertainty (D-Optimality). If D-Optimality is not provided, the reward is 0. Otherwise, it is calculated as the hyperbolic tangent of 0.01 divided by the D-Optimality value. 
 
       ~ This ranges from 0 to 1. 
