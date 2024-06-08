@@ -26,21 +26,21 @@ def reward_function(
     - float: The calculated reward.
     """
 
-    initial_reward = -0.2
+    initial_reward = -0.4
 
     # Negative Reward: Encourage higher linear velocity
-    # Range: [-0.04 , 0] for linear velocity in range [-0.2,0.2]
-    linear_vel_reward = -0.1 * (max_speed - linear_vel)
+    # Range: [-0.4 , 0] for linear velocity in range [-0.2,0.2]
+    linear_vel_reward = -3 * (max_speed - linear_vel)
 
     # Negative Reward: Penalise higher angular velocity
-    # Range: [-0.0484, 0] for angular velocity in range [-2.2, 2.2]
-    angular_vel_reward = -0.01 * (angular_vel**2)
+    # Range: [-0.484, 0] for angular velocity in range [-2.2, 2.2]
+    angular_vel_reward = -0.2 * (angular_vel**2)
 
     # Negative Reward: High penalty for collisions
-    collision_reward = -1 if collided else 0
+    collision_reward = -1000 if collided else 0
 
     # Positive Reward: High reward for reaching the goal
-    goal_reward = 1 if found_goal else 0
+    goal_reward = 1000 if found_goal else 0
 
     if log:
         print(d_opt)
