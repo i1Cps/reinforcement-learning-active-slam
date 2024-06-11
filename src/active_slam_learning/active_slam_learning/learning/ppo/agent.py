@@ -158,7 +158,7 @@ class Agent:
                 actor_loss.mean().backward()
 
                 # Gradient clipping
-                T.nn.utils.clip_grad_norm_(self.actor.parameters(), 40)
+                # T.nn.utils.clip_grad_norm_(self.actor.parameters(), 40)
                 self.actor.optimizer.step()
 
                 # Loss calculation

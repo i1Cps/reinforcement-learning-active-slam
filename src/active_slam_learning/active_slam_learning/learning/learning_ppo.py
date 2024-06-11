@@ -193,6 +193,7 @@ class LearningPPO(Node):
                     self.total_steps += 1
                     trajectory_len += 1
 
+                    # Learn
                     if trajectory_len % TRAJECTORY == 0:
                         self.model.learn(self.memory)
                         trajectory_len = 0
@@ -265,10 +266,10 @@ class LearningPPO(Node):
 
     # Drastically increases performance
     def clip_reward(self, reward: float) -> float:
-        if reward < -1:
-            return -1
-        elif reward > 1:
-            return 1
+        if reward < -10:
+            return -10
+        elif reward > 10:
+            return 10
         else:
             return reward
 
